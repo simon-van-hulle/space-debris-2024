@@ -467,17 +467,37 @@ def propagate_state_and_covar(Xo, Po, tvec, state_params, int_params, bodies=Non
 
     # Extract the resulting state history and convert it to an ndarray
     states = dynamics_simulator.state_history
-    states_array = result2array(states)        
-    
-    
-    tf = states_array[-1,0]
-    chi_v = states_array[-1,1:]
-    
+    states_array = result2array(states)
+
+    # Initialize arrays to store results
+    tf_array = np.zeros(states_array.shape[0])
+    Xf_array = np.zeros((states_array.shape[0], n, 1))
+    Pf_array = np.zeros((states_array.shape[0], n, n))
+
+    # Loop over all timesteps in states_array
+    for i in range(states_array.shape[0]):
+        t = states_array[i,0]
+        chi_v = states_array[i,1:]
+
+        # Compute mean and covariance at final time using unscented transform
+        chi = np.reshape(chi_v, (n, 2*n+1), order='F')
+        Xf = np.dot(chi, Wm.T)
+        Xf = np.reshape(Xf, (n, 1))
+        chi_diff = chi - np.dot(Xf, np.ones((1, (2*n+1))))
+        Pf = np.dot(chi_diff, np.dot(diagWc, chi_diff.T))
+
+        tf_array[i] = t
+        Xf_array[i] = Xf
+        Pf_array[i] = Pf
+
+    tf_check = states_array[-1,0]
+    chi_v_check = states_array[-1,1:]
+
     # Compute mean and covariance at final time using unscented transform
-    chi = np.reshape(chi_v, (n, 2*n+1), order='F')
-    Xf = np.dot(chi, Wm.T)
-    Xf = np.reshape(Xf, (n, 1))
-    chi_diff = chi - np.dot(Xf, np.ones((1, (2*n+1))))
-    Pf = np.dot(chi_diff, np.dot(diagWc, chi_diff.T))
+    chi_check = np.reshape(chi_v_check, (n, 2*n+1), order='F')
+    Xf_check = np.dot(chi_check, Wm.T)
+    Xf_check = np.reshape(Xf_check, (n, 1))
+    chi_diff_check = chi_check - np.dot(Xf_check, np.ones((1, (2*n+1))))
+    Pf_check = np.dot(chi_diff_check, np.dot(diagWc, chi_diff_check.T))
     
-    return tf, Xf, Pf
+    return tf_array, Xf_array, Pf_array
