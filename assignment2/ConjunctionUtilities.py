@@ -192,6 +192,7 @@ def Pc2D_Foster(X1, P1, X2, P2, HBR, rtol=1e-8, HBR_type='circle'):
         print('Error: HBR type is not supported! Must be circle, square, or squareEqArea')
         print(HBR_type)
     
+    
     return Pc
 
 

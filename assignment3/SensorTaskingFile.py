@@ -10,7 +10,7 @@ from datetime import datetime
 ###############################################################################
 
 # File name should include group number
-json_file = 'group7_sensor_tasking_file.json'
+json_file = 'group4_sensor_tasking_file.json'
 
 # Sensor type is a string, either 'radar' or 'optical'
 sensor_type = 'radar'
