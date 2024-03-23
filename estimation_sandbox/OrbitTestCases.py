@@ -1,12 +1,17 @@
 import numpy as np
 import math
 import os
+import sys
 import pickle
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 
 import Estimators
 
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'assignment3'))
+from utils.utils import *
+
+FIG_DIR = "figures"
 
 
 ###############################################################################
@@ -89,7 +94,10 @@ def generate_orbit_truth(setup_file, truth_file, intfcn):
     return
 
 
+GLOBAL_INDEX = 0
 def generate_orbit_meas(setup_file, truth_file, meas_file):
+    global GLOBAL_INDEX
+    GLOBAL_INDEX += 1
     
     rad2arcsec = 3600.*180./np.pi
     
@@ -187,6 +195,7 @@ def generate_orbit_meas(setup_file, truth_file, meas_file):
         plt.yticks([-720, 0, 720])
         plt.ylabel('DEC [arcsec]')
         plt.xlabel('Time [hours]')
+        savefig(f'orbit_model_meas_noise', FIG_DIR, f"{GLOBAL_INDEX}")
         
     elif m == 2:
     
@@ -201,10 +210,11 @@ def generate_orbit_meas(setup_file, truth_file, meas_file):
         plt.yticks([-3, -1, 1, 3])
         plt.ylabel('DEC [arcsec]')
         plt.xlabel('Time [hours]')
+        savefig('orbit_model_meas_noise', FIG_DIR)
            
     
-    plt.show()
-    
+    # plt.show()
+
     
     return
 

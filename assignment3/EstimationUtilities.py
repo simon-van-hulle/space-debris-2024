@@ -5,9 +5,7 @@ import os
 import pandas as pd
 import pickle
 
-
 import TudatPropagator as prop
-
 
 ###############################################################################
 #
@@ -55,15 +53,15 @@ def read_truth_file(truth_file):
             bodies_to_create: list of bodies to create ["Earth", "Sun", "Moon"]
             
     '''
-    
+
     # Load truth data
-    pklFile = open(truth_file, 'rb' )
-    data = pickle.load( pklFile )
+    pklFile = open(truth_file, 'rb')
+    data = pickle.load(pklFile)
     t_truth = data[0]
     X_truth = data[1]
     state_params = data[2]
     pklFile.close()
-    
+
     return t_truth, X_truth, state_params
 
 
@@ -108,15 +106,14 @@ def read_measurement_file(meas_file):
     '''
 
     # Load measurement data
-    pklFile = open(meas_file, 'rb' )
-    data = pickle.load( pklFile )
+    pklFile = open(meas_file, 'rb')
+    data = pickle.load(pklFile)
     state_params = data[0]
     sensor_params = data[1]
     meas_dict = data[2]
     pklFile.close()
-    
-    return state_params, meas_dict, sensor_params
 
+    return state_params, meas_dict, sensor_params
 
 
 ###############################################################################
@@ -124,7 +121,7 @@ def read_measurement_file(meas_file):
 ###############################################################################
 
 
-def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodies):    
+def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodies, verbose=True):
     '''
     This function implements the Unscented Kalman Filter for the least
     squares cost function.
@@ -181,12 +178,12 @@ def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodie
             resids: px1 numpy array, measurement residuals at tk [meters and/or radians]
         
     '''
-        
+
     # Retrieve data from input parameters
     UTC0 = state_params['UTC']
     t0 = (UTC0 - datetime(2000, 1, 1, 12, 0, 0)).total_seconds()
     Xo = state_params['state']
-    Po = state_params['covar']    
+    Po = state_params['covar']
     Qeci = filter_params['Qeci']
     Qric = filter_params['Qric']
     alpha = filter_params['alpha']
@@ -194,18 +191,18 @@ def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodie
 
     n = len(Xo)
     q = int(Qeci.shape[0])
-    
+
     # Prior information about the distribution
     beta = 2.
     kappa = 3. - float(n)
-    
+
     # Compute sigma point weights    
-    lam = alpha**2.*(n + kappa) - n
+    lam = alpha ** 2. * (n + kappa) - n
     gam = np.sqrt(n + lam)
-    Wm = 1./(2.*(n + lam)) * np.ones(2*n,)
+    Wm = 1. / (2. * (n + lam)) * np.ones(2 * n, )
     Wc = Wm.copy()
-    Wm = np.insert(Wm, 0, lam/(n + lam))
-    Wc = np.insert(Wc, 0, lam/(n + lam) + (1 - alpha**2 + beta))
+    Wm = np.insert(Wm, 0, lam / (n + lam))
+    Wc = np.insert(Wc, 0, lam / (n + lam) + (1 - alpha ** 2 + beta))
     diagWc = np.diag(Wc)
 
     # Initialize output
@@ -214,23 +211,23 @@ def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodie
     # Measurement times
     tk_list = meas_dict['tk_list']
     Yk_list = meas_dict['Yk_list']
-    
+
     # Number of epochs
     N = len(tk_list)
-  
+
     # Loop over times
     Xk = Xo.copy()
     Pk = Po.copy()
     for kk in range(N):
-    
+
         # Current and previous time
         if kk == 0:
             tk_prior = t0
         else:
-            tk_prior = tk_list[kk-1]
+            tk_prior = tk_list[kk - 1]
 
         tk = tk_list[kk]
-        
+
         # Propagate state and covariance
         # No prediction needed if measurement time is same as current state
         if tk_prior == tk:
@@ -238,49 +235,49 @@ def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodie
             Pbar = Pk.copy()
         else:
             tvec = np.array([tk_prior, tk])
-            dum, Xbar, Pbar = prop.propagate_state_and_covar(Xk, Pk, tvec, state_params, int_params, bodies, alpha)
-       
+            dum, Xbar, Pbar = prop.propagate_state_and_covar_original(Xk, Pk, tvec, state_params, int_params, bodies, alpha)
+
         # State Noise Compensation
         # Zero out SNC for long time gaps
         delta_t = tk - tk_prior
-        if delta_t > gap_seconds:    
-            Gamma = np.zeros((n,q))
+        if delta_t > gap_seconds:
+            Gamma = np.zeros((n, q))
         else:
-            Gamma = np.zeros((n,q))
-            Gamma[0:q,:] = (delta_t**2./2) * np.eye(q)
-            Gamma[q:2*q,:] = delta_t * np.eye(q)
+            Gamma = np.zeros((n, q))
+            Gamma[0:q, :] = (delta_t ** 2. / 2) * np.eye(q)
+            Gamma[q:2 * q, :] = delta_t * np.eye(q)
 
         # Combined Q matrix (ECI and RIC components)
         # Rotate RIC to ECI and add
-        rc_vect = Xbar[0:3].reshape(3,1)
-        vc_vect = Xbar[3:6].reshape(3,1)
+        rc_vect = Xbar[0:3].reshape(3, 1)
+        vc_vect = Xbar[3:6].reshape(3, 1)
         Q = Qeci + ric2eci(rc_vect, vc_vect, Qric)
-                
+
         # Add Process Noise to Pbar
         Pbar += np.dot(Gamma, np.dot(Q, Gamma.T))
 
         # Recompute sigma points to incorporate process noise
         sqP = np.linalg.cholesky(Pbar)
         Xrep = np.tile(Xbar, (1, n))
-        chi_bar = np.concatenate((Xbar, Xrep+(gam*sqP), Xrep-(gam*sqP)), axis=1) 
-        chi_diff = chi_bar - np.dot(Xbar, np.ones((1, (2*n+1))))
-        
+        chi_bar = np.concatenate((Xbar, Xrep + (gam * sqP), Xrep - (gam * sqP)), axis=1)
+        chi_diff = chi_bar - np.dot(Xbar, np.ones((1, (2 * n + 1))))
+
         # Measurement Update: posterior state and covar at tk       
         # Retrieve measurement data
         Yk = Yk_list[kk]
-        
+
         # Computed measurements and covariance
         gamma_til_k, Rk = unscented_meas(tk, chi_bar, sensor_params)
         ybar = np.dot(gamma_til_k, Wm.T)
         ybar = np.reshape(ybar, (len(ybar), 1))
-        Y_diff = gamma_til_k - np.dot(ybar, np.ones((1, (2*n+1))))
+        Y_diff = gamma_til_k - np.dot(ybar, np.ones((1, (2 * n + 1))))
         Pyy = np.dot(Y_diff, np.dot(diagWc, Y_diff.T)) + Rk
-        Pxy = np.dot(chi_diff,  np.dot(diagWc, Y_diff.T))
-        
+        Pxy = np.dot(chi_diff, np.dot(diagWc, Y_diff.T))
+
         # Kalman gain and measurement update
         Kk = np.dot(Pxy, np.linalg.inv(Pyy))
-        Xk = Xbar + np.dot(Kk, Yk-ybar)
-        
+        Xk = Xbar + np.dot(Kk, Yk - ybar)
+
         # Joseph form of covariance update
         cholPbar = np.linalg.inv(np.linalg.cholesky(Pbar))
         invPbar = np.dot(cholPbar.T, cholPbar)
@@ -291,27 +288,27 @@ def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodie
         # Recompute measurments using final state to get resids
         sqP = np.linalg.cholesky(P)
         Xrep = np.tile(Xk, (1, n))
-        chi_k = np.concatenate((Xk, Xrep+(gam*sqP), Xrep-(gam*sqP)), axis=1)        
+        chi_k = np.concatenate((Xk, Xrep + (gam * sqP), Xrep - (gam * sqP)), axis=1)
         gamma_til_post, dum = unscented_meas(tk, chi_k, sensor_params)
         ybar_post = np.dot(gamma_til_post, Wm.T)
         ybar_post = np.reshape(ybar_post, (len(ybar), 1))
-        
+
         # Post-fit residuals and updated state
         resids = Yk - ybar_post
-        
-        print('')
-        print('kk', kk)
-        print('Yk', Yk)
-        print('ybar', ybar)     
-        print('resids', resids)
-        
+
+        if verbose:
+            print('')
+            print('kk', kk)
+            print('Yk', Yk)
+            print('ybar', ybar)
+            print('resids', resids)
+
         # Store output
         filter_output[tk] = {}
         filter_output[tk]['state'] = Xk
         filter_output[tk]['covar'] = P
         filter_output[tk]['resids'] = resids
 
-    
     return filter_output
 
 
@@ -341,19 +338,19 @@ def unscented_meas(tk, chi, sensor_params):
         measurement noise covariance
         
     '''
-    
+
     # Number of states
     n = int(chi.shape[0])
-    
+
     # Compute sensor position in GCRF
     eop_alldata = sensor_params['eop_alldata']
     XYs_df = sensor_params['XYs_df']
     UTC = datetime(2000, 1, 1, 12, 0, 0) + timedelta(seconds=tk)
     EOP_data = get_eop_data(eop_alldata, UTC)
-    
+
     sensor_itrf = sensor_params['sensor_itrf']
-    sensor_gcrf, dum = itrf2gcrf(sensor_itrf, np.zeros((3,1)), UTC, EOP_data, XYs_df)
-    
+    sensor_gcrf, dum = itrf2gcrf(sensor_itrf, np.zeros((3, 1)), UTC, EOP_data, XYs_df)
+
     # Measurement information    
     meas_types = sensor_params['meas_types']
     sigma_dict = sensor_params['sigma_dict']
@@ -362,86 +359,85 @@ def unscented_meas(tk, chi, sensor_params):
     for ii in range(p):
         mtype = meas_types[ii]
         sig = sigma_dict[mtype]
-        Rk[ii,ii] = sig**2.
-    
+        Rk[ii, ii] = sig ** 2.
+
     # Compute transformed sigma points
-    gamma_til = np.zeros((p, (2*n+1)))
-    for jj in range(2*n+1):
-        
-        x = chi[0,jj]
-        y = chi[1,jj]
-        z = chi[2,jj]
-        
+    gamma_til = np.zeros((p, (2 * n + 1)))
+    for jj in range(2 * n + 1):
+
+        x = chi[0, jj]
+        y = chi[1, jj]
+        z = chi[2, jj]
+
         # Object location in GCRF
-        r_gcrf = np.reshape([x,y,z], (3,1))
-        
+        r_gcrf = np.reshape([x, y, z], (3, 1))
+
         # Compute range and line of sight vector
         rho_gcrf = r_gcrf - sensor_gcrf
         rg = np.linalg.norm(rho_gcrf)
-        rho_hat_gcrf = rho_gcrf/rg
-        
+        rho_hat_gcrf = rho_gcrf / rg
+
         # Rotate to ENU frame
-        rho_hat_itrf, dum = gcrf2itrf(rho_hat_gcrf, np.zeros((3,1)), UTC, EOP_data,
+        rho_hat_itrf, dum = gcrf2itrf(rho_hat_gcrf, np.zeros((3, 1)), UTC, EOP_data,
                                       XYs_df)
         rho_hat_enu = ecef2enu(rho_hat_itrf, sensor_itrf)
-        
+
         if 'rg' in meas_types:
             rg_ind = meas_types.index('rg')
-            gamma_til[rg_ind,jj] = rg
-            
+            gamma_til[rg_ind, jj] = rg
+
         if 'ra' in meas_types:
-        
-            ra = math.atan2(rho_hat_gcrf[1], rho_hat_gcrf[0]) # rad        
-        
+
+            ra = math.atan2(rho_hat_gcrf[1], rho_hat_gcrf[0])  # rad
+
             # Store quadrant info of mean sigma point        
             if jj == 0:
                 quad = 0
-                if ra > np.pi/2. and ra < np.pi:
+                if ra > np.pi / 2. and ra < np.pi:
                     quad = 2
-                if ra < -np.pi/2. and ra > -np.pi:
+                if ra < -np.pi / 2. and ra > -np.pi:
                     quad = 3
-                    
+
             # Check and update quadrant of subsequent sigma points
             else:
                 if quad == 2 and ra < 0.:
-                    ra += 2.*np.pi
+                    ra += 2. * np.pi
                 if quad == 3 and ra > 0.:
-                    ra -= 2.*np.pi
-                    
+                    ra -= 2. * np.pi
+
             ra_ind = meas_types.index('ra')
-            gamma_til[ra_ind,jj] = ra
-                
-        if 'dec' in meas_types:        
+            gamma_til[ra_ind, jj] = ra
+
+        if 'dec' in meas_types:
             dec = math.asin(rho_hat_gcrf[2])  # rad
             dec_ind = meas_types.index('dec')
-            gamma_til[dec_ind,jj] = dec
-            
+            gamma_til[dec_ind, jj] = dec
+
         if 'az' in meas_types:
             az = math.atan2(rho_hat_enu[0], rho_hat_enu[1])  # rad 
-            
+
             # Store quadrant info of mean sigma point        
             if jj == 0:
                 quad = 0
-                if az > np.pi/2. and az < np.pi:
+                if az > np.pi / 2. and az < np.pi:
                     quad = 2
-                if az < -np.pi/2. and az > -np.pi:
+                if az < -np.pi / 2. and az > -np.pi:
                     quad = 3
-                    
+
             # Check and update quadrant of subsequent sigma points
             else:
                 if quad == 2 and az < 0.:
-                    az += 2.*np.pi
+                    az += 2. * np.pi
                 if quad == 3 and az > 0.:
-                    az -= 2.*np.pi
-                    
+                    az -= 2. * np.pi
+
             az_ind = meas_types.index('az')
-            gamma_til[az_ind,jj] = az
-            
+            gamma_til[az_ind, jj] = az
+
         if 'el' in meas_types:
             el = math.asin(rho_hat_enu[2])  # rad
             el_ind = meas_types.index('el')
-            gamma_til[el_ind,jj] = el
-
+            gamma_til[el_ind, jj] = el
 
     return gamma_til, Rk
 
@@ -466,60 +462,58 @@ def compute_measurement(tk, X, sensor_params):
         computed measurements for given state and sensor
     
     '''
-    
+
     # Retrieve EOP data
     UTC = datetime(2000, 1, 1, 12, 0, 0) + timedelta(seconds=tk)
     eop_alldata = sensor_params['eop_alldata']
     EOP_data = get_eop_data(eop_alldata, UTC)
-    XYs_df = sensor_params['XYs_df']    
-    
+    XYs_df = sensor_params['XYs_df']
+
     # Retrieve measurement types
     meas_types = sensor_params['meas_types']
-    
+
     # Compute station location in GCRF
     sensor_itrf = sensor_params['sensor_itrf']
-    sensor_gcrf, dum = itrf2gcrf(sensor_itrf, np.zeros((3,1)), UTC, EOP_data,
+    sensor_gcrf, dum = itrf2gcrf(sensor_itrf, np.zeros((3, 1)), UTC, EOP_data,
                                  XYs_df)
-    
+
     # Object location in GCRF
-    r_gcrf = X[0:3].reshape(3,1)
-    
+    r_gcrf = X[0:3].reshape(3, 1)
+
     # Compute range and line of sight vector
     rg = np.linalg.norm(r_gcrf - sensor_gcrf)
-    rho_hat_gcrf = (r_gcrf - sensor_gcrf)/rg
-    
+    rho_hat_gcrf = (r_gcrf - sensor_gcrf) / rg
+
     # Rotate to ENU frame
-    rho_hat_itrf, dum = gcrf2itrf(rho_hat_gcrf, np.zeros((3,1)), UTC, EOP_data,
+    rho_hat_itrf, dum = gcrf2itrf(rho_hat_gcrf, np.zeros((3, 1)), UTC, EOP_data,
                                   XYs_df)
     rho_hat_enu = ecef2enu(rho_hat_itrf, sensor_itrf)
-    
+
     # Loop over measurement types
-    Y = np.zeros((len(meas_types),1))
+    Y = np.zeros((len(meas_types), 1))
     ii = 0
     for mtype in meas_types:
-        
+
         if mtype == 'rg':
             Y[ii] = rg  # m
-            
+
         elif mtype == 'ra':
-            Y[ii] = math.atan2(rho_hat_gcrf[1], rho_hat_gcrf[0]) # rad
-            
+            Y[ii] = math.atan2(rho_hat_gcrf[1], rho_hat_gcrf[0])  # rad
+
         elif mtype == 'dec':
             Y[ii] = math.asin(rho_hat_gcrf[2])  # rad
-    
+
         elif mtype == 'az':
             Y[ii] = math.atan2(rho_hat_enu[0], rho_hat_enu[1])  # rad  
             # if Y[ii] < 0.:
             #     Y[ii] += 2.*np.pi
-            
+
         elif mtype == 'el':
             Y[ii] = math.asin(rho_hat_enu[2])  # rad
-            
-        ii += 1
-            
-            
-    return Y
 
+        ii += 1
+
+    return Y
 
 
 def define_radar_sensor(latitude_rad, longitude_rad, height_m):
@@ -545,43 +539,42 @@ def define_radar_sensor(latitude_rad, longitude_rad, height_m):
         location, constraint, noise parameters of sensor
 
     '''
-    
+
     # EOP data
     eop_file = os.path.join(data_dir, 'eop_alldata.pkl')
-    pklFile = open(eop_file, 'rb' )
-    data = pickle.load( pklFile )
+    pklFile = open(eop_file, 'rb')
+    data = pickle.load(pklFile)
     eop_alldata = data[0]
     pklFile.close()
-    
+
     XYs_df = get_XYs2006_alldata()
-    
-        
+
     # Compute sensor location in ECEF/ITRF
     sensor_itrf = latlonht2ecef(latitude_rad, longitude_rad, height_m)
-        
+
     # FOV dimensions
-    LAM_deg = 10.   # deg
-    PHI_deg = 10.   # deg
-    
+    LAM_deg = 10.  # deg
+    PHI_deg = 10.  # deg
+
     # Convert to radians
-    LAM_half = 0.5*LAM_deg*np.pi/180
-    PHI_half = 0.5*PHI_deg*np.pi/180
+    LAM_half = 0.5 * LAM_deg * np.pi / 180
+    PHI_half = 0.5 * PHI_deg * np.pi / 180
     FOV_hlim = [-LAM_half, LAM_half]
     FOV_vlim = [-PHI_half, PHI_half]
-    
+
     # Constraints/Limits
-    az_lim = [0., 2.*np.pi]  # rad
-    el_lim = [5.*np.pi/180., np.pi/2.]  # rad
-    rg_lim = [0., 5000.*1000.]   # m
+    az_lim = [0., 2. * np.pi]  # rad
+    el_lim = [5. * np.pi / 180., np.pi / 2.]  # rad
+    rg_lim = [0., 5000. * 1000.]  # m
     sun_el_mask = -np.pi  # rad
-    
+
     # Measurement types and noise
     meas_types = ['rg', 'az', 'el']
     sigma_dict = {}
-    sigma_dict['rg'] = 10.              # m
-    sigma_dict['az'] = 0.1*np.pi/180.   # rad
-    sigma_dict['el'] = 0.1*np.pi/180.   # rad
-        
+    sigma_dict['rg'] = 10.  # m
+    sigma_dict['az'] = 0.1 * np.pi / 180.  # rad
+    sigma_dict['el'] = 0.1 * np.pi / 180.  # rad
+
     # Location and constraints
     sensor_params = {}
     sensor_params['sensor_itrf'] = sensor_itrf
@@ -591,15 +584,15 @@ def define_radar_sensor(latitude_rad, longitude_rad, height_m):
     sensor_params['FOV_hlim'] = FOV_hlim
     sensor_params['FOV_vlim'] = FOV_vlim
     sensor_params['sun_elmask'] = sun_el_mask
-    
+
     # Measurements and noise
     sensor_params['meas_types'] = meas_types
     sensor_params['sigma_dict'] = sigma_dict
-    
+
     # EOP data
     sensor_params['eop_alldata'] = eop_alldata
     sensor_params['XYs_df'] = XYs_df
-    
+
     return sensor_params
 
 
@@ -626,43 +619,43 @@ def define_optical_sensor(latitude_rad, longitude_rad, height_m):
         location, constraint, noise parameters of sensor
 
     '''
-    
-    arcsec2rad = (1./3600.)*np.pi/180.
-    
+
+    arcsec2rad = (1. / 3600.) * np.pi / 180.
+
     # EOP data
     eop_file = os.path.join(data_dir, 'eop_alldata.pkl')
-    pklFile = open(eop_file, 'rb' )
-    data = pickle.load( pklFile )
+    pklFile = open(eop_file, 'rb')
+    data = pickle.load(pklFile)
     eop_alldata = data[0]
     pklFile.close()
-    
+
     XYs_df = get_XYs2006_alldata()
-        
+
     # Compute sensor location in ECEF/ITRF
     sensor_itrf = latlonht2ecef(latitude_rad, longitude_rad, height_m)
-        
+
     # FOV dimensions
-    LAM_deg = 4.   # deg
-    PHI_deg = 4.   # deg
-    
+    LAM_deg = 4.  # deg
+    PHI_deg = 4.  # deg
+
     # Convert to radians
-    LAM_half = 0.5*LAM_deg*np.pi/180
-    PHI_half = 0.5*PHI_deg*np.pi/180
+    LAM_half = 0.5 * LAM_deg * np.pi / 180
+    PHI_half = 0.5 * PHI_deg * np.pi / 180
     FOV_hlim = [-LAM_half, LAM_half]
     FOV_vlim = [-PHI_half, PHI_half]
-    
+
     # Constraints/Limits
-    az_lim = [0., 2.*np.pi]  # rad
-    el_lim = [15.*np.pi/180., np.pi/2.]  # rad
-    rg_lim = [0., np.inf]   # m
-    sun_el_mask = -12.*np.pi/180.  # rad (Nautical twilight)
-    
+    az_lim = [0., 2. * np.pi]  # rad
+    el_lim = [15. * np.pi / 180., np.pi / 2.]  # rad
+    rg_lim = [0., np.inf]  # m
+    sun_el_mask = -12. * np.pi / 180.  # rad (Nautical twilight)
+
     # Measurement types and noise
     meas_types = ['ra', 'dec']
     sigma_dict = {}
-    sigma_dict['ra'] = arcsec2rad    # rad
-    sigma_dict['dec'] = arcsec2rad   # rad
-        
+    sigma_dict['ra'] = arcsec2rad  # rad
+    sigma_dict['dec'] = arcsec2rad  # rad
+
     # Location and constraints
     sensor_params = {}
     sensor_params['sensor_itrf'] = sensor_itrf
@@ -672,23 +665,16 @@ def define_optical_sensor(latitude_rad, longitude_rad, height_m):
     sensor_params['FOV_hlim'] = FOV_hlim
     sensor_params['FOV_vlim'] = FOV_vlim
     sensor_params['sun_elmask'] = sun_el_mask
-    
+
     # Measurements and noise
     sensor_params['meas_types'] = meas_types
     sensor_params['sigma_dict'] = sigma_dict
-    
+
     # EOP data
     sensor_params['eop_alldata'] = eop_alldata
     sensor_params['XYs_df'] = XYs_df
-    
+
     return sensor_params
-
-
-
-
-
-
-
 
 
 ###############################################################################
@@ -726,16 +712,16 @@ def ecef2enu(r_ecef, r_site):
     lat, lon, ht = ecef2latlonht(r_site)
 
     # Compute rotation matrix
-    lat1 = math.pi/2 - lat
-    lon1 = math.pi/2 + lon
+    lat1 = math.pi / 2 - lat
+    lon1 = math.pi / 2 + lon
 
-    R1 = np.array([[1.,               0.,             0.],
-                   [0.,   math.cos(lat1), math.sin(lat1)],
-                   [0.,  -math.sin(lat1), math.cos(lat1)]])
+    R1 = np.array([[1., 0., 0.],
+                   [0., math.cos(lat1), math.sin(lat1)],
+                   [0., -math.sin(lat1), math.cos(lat1)]])
 
-    R3 = np.array([[math.cos(lon1),  math.sin(lon1), 0.],
+    R3 = np.array([[math.cos(lon1), math.sin(lon1), 0.],
                    [-math.sin(lon1), math.cos(lon1), 0.],
-                   [0.,              0.,             1.]])
+                   [0., 0., 1.]])
 
     R = np.dot(R1, R3)
 
@@ -766,16 +752,16 @@ def enu2ecef(r_enu, r_site):
     lat, lon, ht = ecef2latlonht(r_site)
 
     # Compute rotation matrix
-    lat1 = math.pi/2 - lat
-    lon1 = math.pi/2 + lon
+    lat1 = math.pi / 2 - lat
+    lon1 = math.pi / 2 + lon
 
-    R1 = np.array([[1.,               0.,             0.],
-                   [0.,   math.cos(lat1), math.sin(lat1)],
-                   [0.,  -math.sin(lat1), math.cos(lat1)]])
+    R1 = np.array([[1., 0., 0.],
+                   [0., math.cos(lat1), math.sin(lat1)],
+                   [0., -math.sin(lat1), math.cos(lat1)]])
 
-    R3 = np.array([[math.cos(lon1),   math.sin(lon1), 0.],
-                   [-math.sin(lon1),  math.cos(lon1), 0.],
-                   [0.,                           0., 1.]])
+    R3 = np.array([[math.cos(lon1), math.sin(lon1), 0.],
+                   [-math.sin(lon1), math.cos(lon1), 0.],
+                   [0., 0., 1.]])
 
     R = np.dot(R1, R3)
 
@@ -807,7 +793,7 @@ def ecef2latlonht(r_ecef):
     '''
 
     # WGS84 Data (Pratap and Misra P. 103)
-    a = 6378137.0   # m
+    a = 6378137.0  # m
     rec_f = 298.257223563
 
     # Get components from position vector
@@ -816,23 +802,22 @@ def ecef2latlonht(r_ecef):
     z = float(r_ecef[2])
 
     # Compute longitude
-    f = 1./rec_f
-    e = np.sqrt(2.*f - f**2.)
+    f = 1. / rec_f
+    e = np.sqrt(2. * f - f ** 2.)
     lon = math.atan2(y, x)
 
     # Iterate to find height and latitude
-    p = np.sqrt(x**2. + y**2.)  # m
+    p = np.sqrt(x ** 2. + y ** 2.)  # m
     lat = 0.
     lat_diff = 1.
     tol = 1e-12
 
     while abs(lat_diff) > tol:
         lat0 = float(lat)  # rad
-        N = a/np.sqrt(1 - e**2*(math.sin(lat0)**2))  # km
-        ht = p/math.cos(lat0) - N
-        lat = math.atan((z/p)/(1 - e**2*(N/(N + ht))))
+        N = a / np.sqrt(1 - e ** 2 * (math.sin(lat0) ** 2))  # km
+        ht = p / math.cos(lat0) - N
+        lat = math.atan((z / p) / (1 - e ** 2 * (N / (N + ht))))
         lat_diff = lat - lat0
-
 
     return lat, lon, ht
 
@@ -856,24 +841,24 @@ def latlonht2ecef(lat, lon, ht):
     r_ecef = 3x1 numpy array
       position vector in ECEF [m]
     '''
-    
+
     # WGS84 Data (Pratap and Misra P. 103)
-    Re = 6378137.0   # m
+    Re = 6378137.0  # m
     rec_f = 298.257223563
 
     # Compute flattening and eccentricity
-    f = 1/rec_f
-    e = np.sqrt(2*f - f**2)
+    f = 1 / rec_f
+    e = np.sqrt(2 * f - f ** 2)
 
     # Compute ecliptic plane and out of plane components
-    C = Re/np.sqrt(1 - e**2*math.sin(lat)**2)
-    S = Re*(1 - e**2)/np.sqrt(1 - e**2*math.sin(lat)**2)
+    C = Re / np.sqrt(1 - e ** 2 * math.sin(lat) ** 2)
+    S = Re * (1 - e ** 2) / np.sqrt(1 - e ** 2 * math.sin(lat) ** 2)
 
-    rd = (C + ht)*math.cos(lat)
-    rk = (S + ht)*math.sin(lat)
+    rd = (C + ht) * math.cos(lat)
+    rk = (S + ht) * math.sin(lat)
 
     # Compute ECEF position vector
-    r_ecef = np.array([[rd*math.cos(lon)], [rd*math.sin(lon)], [rk]])
+    r_ecef = np.array([[rd * math.cos(lon)], [rd * math.sin(lon)], [rk]])
 
     return r_ecef
 
@@ -897,17 +882,17 @@ def eci2ric(rc_vect, vc_vect, Q_eci=[]):
     Q_ric : 3x1 or 3x3 numpy array
       vector or matrix in RIC
     '''
-    
+
     # Reshape inputs
-    rc_vect = rc_vect.reshape(3,1)
-    vc_vect = vc_vect.reshape(3,1)
+    rc_vect = rc_vect.reshape(3, 1)
+    vc_vect = vc_vect.reshape(3, 1)
 
     # Compute transformation matrix to Hill (RIC) frame
     rc = np.linalg.norm(rc_vect)
-    OR = rc_vect/rc
+    OR = rc_vect / rc
     h_vect = np.cross(rc_vect, vc_vect, axis=0)
     h = np.linalg.norm(h_vect)
-    OH = h_vect/h
+    OH = h_vect / h
     OT = np.cross(OH, OR, axis=0)
 
     ON = np.concatenate((OR.T, OT.T, OH.T))
@@ -916,7 +901,7 @@ def eci2ric(rc_vect, vc_vect, Q_eci=[]):
     if len(Q_eci) == 0:
         Q_ric = ON
     elif np.size(Q_eci) == 3:
-        Q_eci = Q_eci.reshape(3,1)
+        Q_eci = Q_eci.reshape(3, 1)
         Q_ric = np.dot(ON, Q_eci)
     else:
         Q_ric = np.dot(np.dot(ON, Q_eci), ON.T)
@@ -943,17 +928,17 @@ def ric2eci(rc_vect, vc_vect, Q_ric=[]):
     Q_ric : 3x1 or 3x3 numpy array
       vector or matrix in ECI
     '''
-    
+
     # Reshape inputs
-    rc_vect = rc_vect.reshape(3,1)
-    vc_vect = vc_vect.reshape(3,1)
+    rc_vect = rc_vect.reshape(3, 1)
+    vc_vect = vc_vect.reshape(3, 1)
 
     # Compute transformation matrix to Hill (RIC) frame
     rc = np.linalg.norm(rc_vect)
-    OR = rc_vect/rc
+    OR = rc_vect / rc
     h_vect = np.cross(rc_vect, vc_vect, axis=0)
     h = np.linalg.norm(h_vect)
-    OH = h_vect/h
+    OH = h_vect / h
     OT = np.cross(OH, OR, axis=0)
 
     ON = np.concatenate((OR.T, OT.T, OH.T))
@@ -988,33 +973,33 @@ def get_eop_data(data_text, UTC):
     EOP_data : dictionary
         EOP data for the given time including pole coordinates and offsets,
         time offsets, and length of day
-    '''    
-        
+    '''
+
     # Compute MJD for desired time
     MJD = dt2mjd(UTC)
     MJD_int = int(MJD)
-    
+
     # Find EOP data lines around time of interest
     nchar = 102
     nskip = 1
     nlines = 0
     for ii in range(len(data_text)):
-        start = ii + nlines*(nchar+nskip)
-        stop = ii + nlines*(nchar+nskip) + nchar
+        start = ii + nlines * (nchar + nskip)
+        stop = ii + nlines * (nchar + nskip) + nchar
         line = data_text[start:stop]
         nlines += 1
-        
+
         MJD_line = int(line[11:16])
-        
+
         if MJD_line == MJD_int:
             line0 = line
-        if MJD_line == MJD_int+1:
+        if MJD_line == MJD_int + 1:
             line1 = line
             break
-    
+
     # Compute EOP data at desired time by interpolating
     EOP_data = eop_linear_interpolate(line0, line1, MJD)
-    
+
     return EOP_data
 
 
@@ -1037,38 +1022,37 @@ def eop_linear_interpolate(line0, line1, MJD):
     EOP_data : dictionary
         EOP data for the given time including pole coordinates and offsets,
         time offsets, and length of day        
-    '''    
-    
+    '''
+
     # Initialize output
     EOP_data = {}
-    
+
     # Leap seconds do not interpolate
     EOP_data['TAI_UTC'] = int(line0[99:102])
-    
+
     # Retrieve values
     line0_array = eop_read_line(line0)
     line1_array = eop_read_line(line1)
-    
+
     # Adjust UT1-UTC column in case leap second occurs between lines
     line0_array[3] -= line0_array[9]
     line1_array[3] -= line1_array[9]
-    
+
     # Linear interpolation
     dt = MJD - line0_array[0]
-    interp = (line1_array[1:] - line0_array[1:])/ \
-        (line1_array[0] - line0_array[0]) * dt + line0_array[1:]
+    interp = (line1_array[1:] - line0_array[1:]) / \
+             (line1_array[0] - line0_array[0]) * dt + line0_array[1:]
 
     # Convert final output
-    arcsec2rad = (1./3600.) * math.pi/180.
-    EOP_data['xp'] = interp[0]*arcsec2rad
-    EOP_data['yp'] = interp[1]*arcsec2rad
+    arcsec2rad = (1. / 3600.) * math.pi / 180.
+    EOP_data['xp'] = interp[0] * arcsec2rad
+    EOP_data['yp'] = interp[1] * arcsec2rad
     EOP_data['UT1_UTC'] = interp[2] + EOP_data['TAI_UTC']
     EOP_data['LOD'] = interp[3]
-    EOP_data['ddPsi'] = interp[4]*arcsec2rad
-    EOP_data['ddEps'] = interp[5]*arcsec2rad
-    EOP_data['dX'] = interp[6]*arcsec2rad
-    EOP_data['dY'] = interp[7]*arcsec2rad
-    
+    EOP_data['ddPsi'] = interp[4] * arcsec2rad
+    EOP_data['ddEps'] = interp[5] * arcsec2rad
+    EOP_data['dX'] = interp[6] * arcsec2rad
+    EOP_data['dY'] = interp[7] * arcsec2rad
 
     return EOP_data
 
@@ -1105,7 +1089,7 @@ def eop_read_line(line):
     line_array : 1D numpy array
         EOP parameters in 1D array    
     '''
-    
+
     MJD = float(line[11:16])
     xp = float(line[17:26])
     yp = float(line[27:36])
@@ -1116,13 +1100,13 @@ def eop_read_line(line):
     dX = float(line[79:88])
     dY = float(line[89:98])
     TAI_UTC = float(line[99:102])
-    
+
     line_array = np.array([MJD, xp, yp, UT1_UTC, LOD, ddPsi, ddEps, dX, dY,
                            TAI_UTC])
-    
+
     return line_array
 
-        
+
 def get_nutation_data(TEME_flag=True):
     '''
     This function retrieves nutation data from the IAU 1980 CSV file included
@@ -1141,23 +1125,22 @@ def get_nutation_data(TEME_flag=True):
     IAU1980_nutation : 2D numpy array
         array of nutation coefficients    
     '''
-    
+
     df = pd.read_csv(os.path.join(data_dir, 'IAU1980_nutation.csv'))
-    
+
     # For TEME-GCRF conversion, reduce to 4 largest entries      
-    if TEME_flag:          
+    if TEME_flag:
         df = df.loc[np.abs(df['dPsi']) > 2000.]
-        
+
     IAU1980_nutation = df.values
-    
+
     return IAU1980_nutation
 
 
 def get_XYs2006_alldata():
-    
     # Load data
     XYs_df = pd.read_csv(os.path.join(data_dir, 'IAU2006_XYs.csv'))
-    
+
     return XYs_df
 
 
@@ -1192,23 +1175,23 @@ def init_XYs2006(TT1, TT2, XYs_df=[]):
         [yr, mo, day, MJD, X, Y, s]
     
     '''
-    
+
     # Load data if needed
-    if len(XYs_df) == 0:        
-        XYs_df = pd.read_csv(os.path.join(data_dir, 'IAU2006_XYs.csv'))        
-        
+    if len(XYs_df) == 0:
+        XYs_df = pd.read_csv(os.path.join(data_dir, 'IAU2006_XYs.csv'))
+
     XYs_alldata = XYs_df.values
-    
+
     # Compute MJD and round to nearest whole day
     MJD1 = int(round(dt2mjd(TT1)))
     MJD2 = int(round(dt2mjd(TT2)))
-    
+
     # Number of additional data points to include on either side
     num = 10
-    
+
     # Find rows
     MJD_data = XYs_df['MJD (0h TT)'].tolist()
-    
+
     if MJD1 < MJD_data[0]:
         print('Error: init_XYs2006 start date before first XYs time')
     elif MJD1 <= MJD_data[0] + num:
@@ -1217,7 +1200,7 @@ def init_XYs2006(TT1, TT2, XYs_df=[]):
         print('Error: init_XYs2006 start date after last XYs time')
     else:
         row1 = MJD_data.index(MJD1) - num
-    
+
     if MJD2 < MJD_data[0]:
         print('Error: init_XYs2006 final date before first XYs time')
     elif MJD2 >= MJD_data[0] - num:
@@ -1226,12 +1209,12 @@ def init_XYs2006(TT1, TT2, XYs_df=[]):
         print('Error: init_XYs2006 final date after last XYs time')
     else:
         row2 = MJD_data.index(MJD2) + num
-        
+
     if row2 == -1:
         XYs_data = XYs_alldata[row1:, :]
     else:
         XYs_data = XYs_alldata[row1:row2, :]
-    
+
     return XYs_data
 
 
@@ -1262,20 +1245,20 @@ def get_XYs(XYs_data, TT_JD):
         Celestial Intermediate Origin (CIO) locator [rad]
     
     '''
-    
+
     # Conversion
-    arcsec2rad  = (1./3600.) * (math.pi/180.)
-    
+    arcsec2rad = (1. / 3600.) * (math.pi / 180.)
+
     # Compute MJD
     TT_MJD = TT_JD - 2400000.5
-    
+
     # Compute interpolation
-    XYs = interp_lagrange(XYs_data[:,3], XYs_data[:,4:], TT_MJD, 11)
-    
-    X = float(XYs[0,0])*arcsec2rad
-    Y = float(XYs[0,1])*arcsec2rad
-    s = float(XYs[0,2])*arcsec2rad
-    
+    XYs = interp_lagrange(XYs_data[:, 3], XYs_data[:, 4:], TT_MJD, 11)
+
+    X = float(XYs[0, 0]) * arcsec2rad
+    Y = float(XYs[0, 1]) * arcsec2rad
+    s = float(XYs[0, 2]) * arcsec2rad
+
     return X, Y, s
 
 
@@ -1305,63 +1288,62 @@ def interp_lagrange(X, Y, xx, p):
         Approach, 2nd ed., 2005.
             
     '''
-    
+
     # Number of data points to use for interpolation (e.g. 8,9,10...)
     N = p + 1
 
     if (len(X) < N):
         print('Not enough data points for desired Lagrange interpolation!')
-        
+
     # Compute number of elements on either side of middle element to grab
-    No2 = 0.5*N
-    nn  = int(math.floor(No2))
-    
+    No2 = 0.5 * N
+    nn = int(math.floor(No2))
+
     # Find index such that X[row0] < xx < X[row0+1]
     row0 = list(np.where(X < xx)[0])[-1]
-    
+
     # Trim data set
     # N is even (p is odd)    
-    if (No2-nn == 0): 
-        
+    if (No2 - nn == 0):
+
         # adjust row0 in case near data set endpoints
-        if (N == len(X)) or (row0 < nn-1):
-            row0 = nn-1
-        elif (row0 > (len(X)-nn)):  # (row0 == length(X))            
-            row0 = len(X) - nn - 1        
-    
-        # Trim to relevant data points
-        X = X[row0-nn+1 : row0+nn+1]
-        Y = Y[row0-nn+1 : row0+nn+1, :]
+        if (N == len(X)) or (row0 < nn - 1):
+            row0 = nn - 1
+        elif (row0 > (len(X) - nn)):  # (row0 == length(X))
+            row0 = len(X) - nn - 1
+
+            # Trim to relevant data points
+        X = X[row0 - nn + 1: row0 + nn + 1]
+        Y = Y[row0 - nn + 1: row0 + nn + 1, :]
 
 
     # N is odd (p is even)
     else:
-    
+
         # adjust row0 in case near data set endpoints
         if (N == len(X)) or (row0 < nn):
             row0 = nn
-        elif (row0 > len(X)-nn):
+        elif (row0 > len(X) - nn):
             row0 = len(X) - nn - 1
         else:
-            if (xx-X(row0) > 0.5) and (row0+1+nn < len(X)):
+            if (xx - X(row0) > 0.5) and (row0 + 1 + nn < len(X)):
                 row0 = row0 + 1
-    
+
         # Trim to relevant data points
-        X = X[row0-nn:row0+nn+1]
-        Y = Y[row0-nn:row0+nn+1, :]
-        
+        X = X[row0 - nn:row0 + nn + 1]
+        Y = Y[row0 - nn:row0 + nn + 1, :]
+
     # Compute coefficients
-    Pj = np.ones((1,N))
-    
+    Pj = np.ones((1, N))
+
     for jj in range(N):
         for ii in range(N):
-            
+
             if jj != ii:
-                Pj[0, jj] = Pj[0, jj] * (-xx+X[ii])/(-X[jj]+X[ii])
-    
-    
+                Pj[0, jj] = Pj[0, jj] * (-xx + X[ii]) / (-X[jj] + X[ii])
+
     yy = np.dot(Pj, Y)
-    
+
     return yy
 
 
@@ -1382,37 +1364,33 @@ def compute_precession_IAU1976(TT_cent):
     P76 : 3x3 numpy array
         precession matrix to compute frame rotation    
     '''
-    
+
     # Conversion
-    arcsec2rad  = (1./3600.) * (math.pi/180.)
+    arcsec2rad = (1. / 3600.) * (math.pi / 180.)
 
     # Table values in arcseconds
-    Pcoef = np.array([[2306.2181,   0.30188,   0.017998], 
-                      [2004.3109,  -0.42665,  -0.041833],
-                      [2306.2181,   1.09468,   0.018203]])
+    Pcoef = np.array([[2306.2181, 0.30188, 0.017998],
+                      [2004.3109, -0.42665, -0.041833],
+                      [2306.2181, 1.09468, 0.018203]])
 
-    
- 
     # Multiply by [TT, TT**2, TT**3]^T  (creates column vector)
     # M[0] = zeta, M[1] = theta, M[2] = z
-    vec = np.array([[TT_cent], [TT_cent**2.], [TT_cent**3.]])
+    vec = np.array([[TT_cent], [TT_cent ** 2.], [TT_cent ** 3.]])
     M = np.dot(Pcoef, vec) * arcsec2rad;
 
     # Construct IAU 1976 Precession Matrix
     # P76 = ROT3(zeta) * ROT2(-theta) * ROT3(z);    
     czet = math.cos(M[0])
     szet = math.sin(M[0])
-    cth  = math.cos(M[1])
-    sth  = math.sin(M[1])
-    cz   = math.cos(M[2])
-    sz   = math.sin(M[2])
-    
-    
-    P76 = np.array([[cth*cz*czet-sz*szet,   sz*cth*czet+szet*cz,  sth*czet],
-                    [-szet*cth*cz-sz*czet, -sz*szet*cth+cz*czet, -sth*szet],
-                    [-sth*cz,              -sth*sz,                    cth]])
-    
-    
+    cth = math.cos(M[1])
+    sth = math.sin(M[1])
+    cz = math.cos(M[2])
+    sz = math.sin(M[2])
+
+    P76 = np.array([[cth * cz * czet - sz * szet, sz * cth * czet + szet * cz, sth * czet],
+                    [-szet * cth * cz - sz * czet, -sz * szet * cth + cz * czet, -sth * szet],
+                    [-sth * cz, -sth * sz, cth]])
+
     return P76
 
 
@@ -1449,49 +1427,49 @@ def compute_nutation_IAU1980(IAU1980nut, TT_cent, ddPsi, ddEps):
     dEps : float
         nutation in obliquity [rad]    
     '''
-    
+
     # Conversion
-    arcsec2rad  = (1./3600.) * (math.pi/180.)
-    
+    arcsec2rad = (1. / 3600.) * (math.pi / 180.)
+
     # Compute fundamental arguments of nutation
     FA = compute_fundarg_IAU1980(TT_cent)
-    
+
     # Compute Nutation in longitude and obliquity  
-    phi = np.dot(IAU1980nut[:,0:5], FA)  # column vector
+    phi = np.dot(IAU1980nut[:, 0:5], FA)  # column vector
     sphi = np.sin(phi)
     cphi = np.cos(phi)
 
     # Calculate Nutation in Longitude, rad    
-    dPsi_vec = IAU1980nut[:,5] + IAU1980nut[:,6]*TT_cent
+    dPsi_vec = IAU1980nut[:, 5] + IAU1980nut[:, 6] * TT_cent
     dPsi_sum = float(np.dot(dPsi_vec.T, sphi))
-    dPsi = ddPsi + dPsi_sum*0.0001*arcsec2rad
+    dPsi = ddPsi + dPsi_sum * 0.0001 * arcsec2rad
 
     # Calculate Nutation in Obliquity, rad
-    dEps_vec = IAU1980nut[:,7] + IAU1980nut[:,8]*TT_cent
+    dEps_vec = IAU1980nut[:, 7] + IAU1980nut[:, 8] * TT_cent
     dEps_sum = float(np.dot(dEps_vec.T, cphi))
-    dEps = ddEps + dEps_sum*0.0001*arcsec2rad
-        
+    dEps = ddEps + dEps_sum * 0.0001 * arcsec2rad
+
     # Mean Obliquity of the Ecliptic, rad
-    Eps0 = (((0.001813*TT_cent - 0.00059)*TT_cent - 46.8150)*TT_cent + 
-             84381.448)*arcsec2rad
-    
+    Eps0 = (((0.001813 * TT_cent - 0.00059) * TT_cent - 46.8150) * TT_cent +
+            84381.448) * arcsec2rad
+
     # True Obliquity of the Ecliptic, rad
     Eps_true = Eps0 + dEps
-    
+
     # Construct Nutation matrix
     # N = ROT1(-Eps_0 * ROT3(dPsi) * ROT1(Eps_true)
-    cep  = math.cos(Eps0)
-    sep  = math.sin(Eps0)
+    cep = math.cos(Eps0)
+    sep = math.sin(Eps0)
     cPsi = math.cos(dPsi)
     sPsi = math.sin(dPsi)
     cept = math.cos(Eps_true)
     sept = math.sin(Eps_true)
-    
+
     N80 = \
-        np.array([[ cPsi,     sPsi*cept,              sept*sPsi             ],
-                  [-sPsi*cep, cept*cPsi*cep+sept*sep, sept*cPsi*cep-sep*cept],
-                  [-sPsi*sep, sep*cept*cPsi-sept*cep, sept*sep*cPsi+cept*cep]])
-    
+        np.array([[cPsi, sPsi * cept, sept * sPsi],
+                  [-sPsi * cep, cept * cPsi * cep + sept * sep, sept * cPsi * cep - sep * cept],
+                  [-sPsi * sep, sep * cept * cPsi - sept * cep, sept * sep * cPsi + cept * cep]])
+
     return N80, FA, Eps0, Eps_true, dPsi, dEps
 
 
@@ -1511,32 +1489,32 @@ def compute_fundarg_IAU1980(TT_cent):
         fundamental arguments of nutation (Delauney arguments) [rad]
     
     '''
-    
+
     # Conversion
-    arcsec2rad  = (1./3600.) * (math.pi/180.)
-    arcsec360 = 3600.*360.
-    
+    arcsec2rad = (1. / 3600.) * (math.pi / 180.)
+    arcsec360 = 3600. * 360.
+
     # Construct table for fundamental arguments of nutation
     #  Units: col 1,   degrees
     #         col 2-5, arcseconds
     #  Note: These values come from page 23 of [3].
-    
+
     # Delauney Arguments
-    DA = np.array([[134.96340251,  1717915923.2178,  31.8792,  0.051635, -0.00024470], # M_moon (l)
-                   [357.52910918,  129596581.04810, -0.55320,  0.000136, -0.00001149], # M_sun (l')
-                   [93.27209062,   1739527262.8478, -12.7512, -0.001037,  0.00000417], # u_Mmoon (F)
-                   [297.85019547,  1602961601.2090, -6.37060,  0.006593, -0.00003169], # D_sun (D)
-                   [125.04455501, -6962890.2665000,  7.47220,  0.007702, -0.00005939]]) # Om_moon (Omega)
+    DA = np.array([[134.96340251, 1717915923.2178, 31.8792, 0.051635, -0.00024470],  # M_moon (l)
+                   [357.52910918, 129596581.04810, -0.55320, 0.000136, -0.00001149],  # M_sun (l')
+                   [93.27209062, 1739527262.8478, -12.7512, -0.001037, 0.00000417],  # u_Mmoon (F)
+                   [297.85019547, 1602961601.2090, -6.37060, 0.006593, -0.00003169],  # D_sun (D)
+                   [125.04455501, -6962890.2665000, 7.47220, 0.007702, -0.00005939]])  # Om_moon (Omega)
 
     # Mulitply by [3600., TT, TT**2, TT**3, TT**4]^T to get column vector 
     # in arcseconds
-    vec = np.array([[3600.], [TT_cent], [TT_cent**2.], [TT_cent**3],
-                    [TT_cent**4]])
+    vec = np.array([[3600.], [TT_cent], [TT_cent ** 2.], [TT_cent ** 3],
+                    [TT_cent ** 4]])
     DA_vec = np.dot(DA, vec)
-    
+
     # Get fractional part of circle and convert to radians
     DA_vec = np.mod(DA_vec, arcsec360) * arcsec2rad
-    
+
     return DA_vec
 
 
@@ -1560,19 +1538,18 @@ def eqnequinox_IAU1982_simple(dPsi, Eps0):
     R : 3x3 numpy array
         matrix to compute frame rotation    
     '''
-    
+
     # Equation of the Equinoxes (simple form for use with TEME) (see [1])
-    Eq1982 = dPsi*math.cos(Eps0) # rad
-    
+    Eq1982 = dPsi * math.cos(Eps0)  # rad
+
     # Construct Rotation matrix
     # R  = ROT3(-Eq1982) (Eq. 3-80 in [1])
     cEq = math.cos(Eq1982)
     sEq = math.sin(Eq1982)
 
-    R = np.array([[cEq,    -sEq,    0.],
-                  [sEq,     cEq,    0.],
-                  [0.,      0.,     1.]])
-    
+    R = np.array([[cEq, -sEq, 0.],
+                  [sEq, cEq, 0.],
+                  [0., 0., 1.]])
 
     return R
 
@@ -1598,14 +1575,14 @@ def compute_polarmotion(xp, yp, TT_cent):
     W : 3x3 numpy array
         matrix to compute frame rotation    
     '''
-    
+
     # Conversion
-    arcsec2rad  = (1./3600.) * (math.pi/180.)
-    
+    arcsec2rad = (1. / 3600.) * (math.pi / 180.)
+
     # Calcuate the Terrestrial Intermediate Origin (TIO) locator 
     # Eq 5.13 in [5]
     sp = -0.000047 * TT_cent * arcsec2rad
-    
+
     # Construct rotation matrix
     # W = ROT3(-sp)*ROT2(xp)*ROT1(yp) (Eq. 5.3 in [5])
     cx = math.cos(xp)
@@ -1614,12 +1591,11 @@ def compute_polarmotion(xp, yp, TT_cent):
     sy = math.sin(yp)
     cs = math.cos(sp)
     ss = math.sin(sp)
-    
-    W = np.array([[cx*cs,  -cy*ss + sy*sx*cs,  -sy*ss - cy*sx*cs],
-                  [cx*ss,   cy*cs + sy*sx*ss,   sy*cs - cy*sx*ss],
-                  [   sx,             -sy*cx,              cy*cx]])
-    
-    
+
+    W = np.array([[cx * cs, -cy * ss + sy * sx * cs, -sy * ss - cy * sx * cs],
+                  [cx * ss, cy * cs + sy * sx * ss, sy * cs - cy * sx * ss],
+                  [sx, -sy * cx, cy * cx]])
+
     return W
 
 
@@ -1646,25 +1622,25 @@ def compute_ERA(UT1_JD):
         matrix to compute frame rotation
     
     '''
-    
+
     # Compute ERA based on Eq. 5.15 of [5]
-    d,i = math.modf(UT1_JD)
-    ERA = 2.*math.pi*(d + 0.7790572732640 + 0.00273781191135448*(UT1_JD - 2451545.))
-    
+    d, i = math.modf(UT1_JD)
+    ERA = 2. * math.pi * (d + 0.7790572732640 + 0.00273781191135448 * (UT1_JD - 2451545.))
+
     # Compute ERA between [0, 2*pi]
-    ERA = ERA % (2.*math.pi)
+    ERA = ERA % (2. * math.pi)
     if ERA < 0.:
-        ERA += 2*math.pi
-        
-#    print(ERA)
-    
+        ERA += 2 * math.pi
+
+    #    print(ERA)
+
     # Construct rotation matrix
     # R = ROT3(-ERA)
     ct = math.cos(ERA)
     st = math.sin(ERA)
     R = np.array([[ct, -st, 0.],
-                  [st,  ct, 0.],
-                  [0.,  0., 1.]])
+                  [st, ct, 0.],
+                  [0., 0., 1.]])
 
     return R
 
@@ -1691,26 +1667,26 @@ def compute_BPN(X, Y, s):
         matrix to compute frame rotation
     
     '''
-    
+
     # Compute z-coordinate of CIP
-    Z  = np.sqrt(1 - X*X - Y*Y)
-    aa = 1./(1. + Z)
-    
+    Z = np.sqrt(1 - X * X - Y * Y)
+    aa = 1. / (1. + Z)
+
     # Construct BPN (Bias-Precession-Nutation Matrix) 
     # Eq. 5.1 in [5]:  BPN = [f(X,Y)]*ROT3(s)
     cs = math.cos(s)
     ss = math.sin(s)
-    
-    f = np.array([[1-aa*X*X,    -aa*X*Y,                X],
-                  [ -aa*X*Y,   1-aa*Y*Y,                Y], 
-                  [      -X,         -Y,   1-aa*(X*X+Y*Y)]])
-    
-    R3 = np.array([[ cs,  ss,  0.],
-                   [-ss,  cs,  0.],
-                   [ 0.,  0.,  1.]])
-    
+
+    f = np.array([[1 - aa * X * X, -aa * X * Y, X],
+                  [-aa * X * Y, 1 - aa * Y * Y, Y],
+                  [-X, -Y, 1 - aa * (X * X + Y * Y)]])
+
+    R3 = np.array([[cs, ss, 0.],
+                   [-ss, cs, 0.],
+                   [0., 0., 1.]])
+
     BPN = np.dot(f, R3)
-    
+
     return BPN
 
 
@@ -1747,52 +1723,50 @@ def gcrf2itrf(r_GCRF, v_GCRF, UTC, EOP_data, XYs_df=[]):
         velocity vector in ITRF
     
     '''
-    
+
     # Form column vectors
-    r_GCRF = np.reshape(r_GCRF, (3,1))
-    v_GCRF = np.reshape(v_GCRF, (3,1))
-        
+    r_GCRF = np.reshape(r_GCRF, (3, 1))
+    v_GCRF = np.reshape(v_GCRF, (3, 1))
+
     # Compute UT1 in JD format
     UT1_JD = utcdt2ut1jd(UTC, EOP_data['UT1_UTC'])
-    
+
     # Compute TT in JD format
     TT_JD = utcdt2ttjd(UTC, EOP_data['TAI_UTC'])
-    
+
     # Compute TT in centuries since J2000 epoch
     TT_cent = jd2cent(TT_JD)
-    
+
     # Construct polar motion matrix (ITRS to TIRS)
     W = compute_polarmotion(EOP_data['xp'], EOP_data['yp'], TT_cent)
-    
+
     # Contruct Earth rotaion angle matrix (TIRS to CIRS)
     R = compute_ERA(UT1_JD)
-    
+
     # Construct Bias-Precessino-Nutation matrix (CIRS to GCRS/ICRS)
     XYs_data = init_XYs2006(UTC, UTC, XYs_df)
-    
+
     X, Y, s = get_XYs(XYs_data, TT_JD)
-    
+
     # Add in Free Core Nutation (FCN) correction
     X = EOP_data['dX'] + X  # rad
     Y = EOP_data['dY'] + Y  # rad
-    
+
     # Compute Bias-Precssion-Nutation (BPN) matrix
     BPN = compute_BPN(X, Y, s)
-    
+
     # Transform position vector
     eci2ecef = np.dot(W.T, np.dot(R.T, BPN.T))
     r_ITRF = np.dot(eci2ecef, r_GCRF)
 
     # Transform velocity vector
     # Calculate Earth rotation rate, rad/s (Vallado p227)
-    wE = 7.29211514670639e-5*(1 - EOP_data['LOD']/86400)                    
+    wE = 7.29211514670639e-5 * (1 - EOP_data['LOD'] / 86400)
     r_TIRS = np.dot(W, r_ITRF)
-        
-    v_ITRF = np.dot(W.T, (np.dot(R.T, np.dot(BPN.T, v_GCRF)) - 
-                          np.cross(np.array([[0.],[0.],[wE]]), r_TIRS, axis=0)))
-    
-    
-    
+
+    v_ITRF = np.dot(W.T, (np.dot(R.T, np.dot(BPN.T, v_GCRF)) -
+                          np.cross(np.array([[0.], [0.], [wE]]), r_TIRS, axis=0)))
+
     return r_ITRF, v_ITRF
 
 
@@ -1829,49 +1803,49 @@ def itrf2gcrf(r_ITRF, v_ITRF, UTC, EOP_data, XYs_df=[]):
         velocity vector in GCRF
     
     '''
-    
+
     # Form column vectors
-    r_ITRF = np.reshape(r_ITRF, (3,1))
-    v_ITRF = np.reshape(v_ITRF, (3,1))
-    
+    r_ITRF = np.reshape(r_ITRF, (3, 1))
+    v_ITRF = np.reshape(v_ITRF, (3, 1))
+
     # Compute UT1 in JD format
     UT1_JD = utcdt2ut1jd(UTC, EOP_data['UT1_UTC'])
-    
+
     # Compute TT in JD format
     TT_JD = utcdt2ttjd(UTC, EOP_data['TAI_UTC'])
-    
+
     # Compute TT in centuries since J2000 epoch
     TT_cent = jd2cent(TT_JD)
-    
+
     # Construct polar motion matrix (ITRS to TIRS)
     W = compute_polarmotion(EOP_data['xp'], EOP_data['yp'], TT_cent)
-    
+
     # Contruct Earth rotaion angle matrix (TIRS to CIRS)
     R = compute_ERA(UT1_JD)
-    
+
     # Construct Bias-Precessino-Nutation matrix (CIRS to GCRS/ICRS)
     XYs_data = init_XYs2006(UTC, UTC, XYs_df)
     X, Y, s = get_XYs(XYs_data, TT_JD)
-    
+
     # Add in Free Core Nutation (FCN) correction
     X = EOP_data['dX'] + X  # rad
     Y = EOP_data['dY'] + Y  # rad
-    
+
     # Compute Bias-Precssion-Nutation (BPN) matrix
     BPN = compute_BPN(X, Y, s)
-    
+
     # Transform position vector
     ecef2eci = np.dot(BPN, np.dot(R, W))
     r_GCRF = np.dot(ecef2eci, r_ITRF)
-    
+
     # Transform velocity vector
     # Calculate Earth rotation rate, rad/s (Vallado p227)
-    wE = 7.29211514670639e-5*(1 - EOP_data['LOD']/86400)                    
+    wE = 7.29211514670639e-5 * (1 - EOP_data['LOD'] / 86400)
     r_TIRS = np.dot(W, r_ITRF)
-    
-    v_GCRF = np.dot(BPN, np.dot(R, (np.dot(W, v_ITRF) + 
-                    np.cross(np.array([[0.],[0.],[wE]]), r_TIRS, axis=0))))  
-    
+
+    v_GCRF = np.dot(BPN, np.dot(R, (np.dot(W, v_ITRF) +
+                                    np.cross(np.array([[0.], [0.], [wE]]), r_TIRS, axis=0))))
+
     return r_GCRF, v_GCRF
 
 
@@ -1892,10 +1866,10 @@ def dt2jd(dt):
         fractional days since 12:00:00 Jan 1 4713 BC
     
     '''
-    
+
     MJD = dt2mjd(dt)
     JD = MJD + 2400000.5
-    
+
     return JD
 
 
@@ -1915,11 +1889,11 @@ def dt2mjd(dt):
     MJD : float
         fractional days since 1858-11-17 00:00:00
     '''
-    
+
     MJD_datetime = datetime(1858, 11, 17, 0, 0, 0)
     delta = dt - MJD_datetime
-    MJD = delta.total_seconds()/timedelta(days=1).total_seconds()
-    
+    MJD = delta.total_seconds() / timedelta(days=1).total_seconds()
+
     return MJD
 
 
@@ -1942,10 +1916,10 @@ def utcdt2ut1jd(UTC, UT1_UTC):
         fractional days since 12:00:00 Jan 1 4713 BC UT1
     
     '''
-    
+
     UTC_JD = dt2jd(UTC)
-    UT1_JD = UTC_JD + (UT1_UTC/86400.)
-    
+    UT1_JD = UTC_JD + (UT1_UTC / 86400.)
+
     return UT1_JD
 
 
@@ -1971,10 +1945,10 @@ def utcdt2ttjd(UTC, TAI_UTC):
         fractional days since 12:00:00 Jan 1 4713 BC TT
     
     '''
-    
+
     UTC_JD = dt2jd(UTC)
-    TT_JD = UTC_JD + (TAI_UTC + 32.184)/86400.
-    
+    TT_JD = UTC_JD + (TAI_UTC + 32.184) / 86400.
+
     return TT_JD
 
 
@@ -1993,7 +1967,7 @@ def jd2cent(JD):
     cent : float
         fractional centuries since 12:00:00 Jan 1 2000
     '''
-    
-    cent = (JD - 2451545.)/36525.
-    
+
+    cent = (JD - 2451545.) / 36525.
+
     return cent
