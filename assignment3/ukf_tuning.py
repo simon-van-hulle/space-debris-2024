@@ -11,6 +11,7 @@ from assignment2.BreakupUtilities import *
 from tudatpy.astro import frame_conversion
 from sklearn.utils import Bunch
 from dataclasses import dataclass
+import time
 
 DATA_DIR = "data/group4"
 RADAR_FILE = "group4_q2a_gps_sparse_radar_meas.pkl"
@@ -160,10 +161,7 @@ def last_idx(*dirs):
 # Main stuff
 ########################################################################################################################
 
-def calc_2a(obs_typ="radar"):
-    VAR_MIN_LOG = -5
-    VAR_MAX_LOG = -3
-    N_VAR = 10
+def calc_var_eci(obs_typ="radar", VAR_MIN_LOG=-7, VAR_MAX_LOG=-5, N_VAR=10):
     var_eci_list = np.logspace(VAR_MIN_LOG, VAR_MAX_LOG, N_VAR)
 
     # First try it out for the radar measurements
@@ -176,7 +174,6 @@ def calc_2a(obs_typ="radar"):
 
     ukf_settings = UkfSettings()
 
-    i_last = last_idx("output", obs_typ)
     for i, var_eci in enumerate(var_eci_list):
         print(f"Running for var_eci = {var_eci:.0e}")
 
@@ -185,11 +182,12 @@ def calc_2a(obs_typ="radar"):
         obs_ukf_raw = ukf_settings.run(obs_meas, verbose=False)
         obs_ukf = UkfResult(obs_ukf_raw, ukf_settings)
 
-        savepkl(f"ukf_{i_last + i:0>3d}.pkl", obs_ukf, "output", obs_typ)
+        current_time = time.strftime("%Y%m%d_%H%M%S")
+        savepkl(f"ukf_{current_time}.pkl", obs_ukf, "output", obs_typ)
 
 
 def process_single_run(ukf_res: UkfResult, t_truth, X_truth, state_params, n_ignore_rms=0, plot=True, subdirs=[],
-                       obs_typ="radar"):
+                       obs_typ="radar", savefigs=True):
     times = ukf_res.times - ukf_res.times[0]
     times_hr = times / 3600
 
@@ -211,7 +209,8 @@ def process_single_run(ukf_res: UkfResult, t_truth, X_truth, state_params, n_ign
     fig = plt.gcf()
     plt.xlabel("Time [hr]")
     fig.supylabel("Position Error [km]")
-    savefig(f"{obs_typ}_resids", FIG_DIR, "q2", *subdirs)
+    if savefigs:
+        savefig(f"{obs_typ}_resids", FIG_DIR, "q2", *subdirs)
 
     # Residuals for all the passes
     pass_indices = ukf_res.indices_per_pass()
@@ -228,7 +227,8 @@ def process_single_run(ukf_res: UkfResult, t_truth, X_truth, state_params, n_ign
         plt.xlabel("Time[hr]")
         fig.supylabel("Position error [km]")
 
-        savefig(f"{obs_typ}_resids_pass_{i}", FIG_DIR, "q2", *subdirs)
+        if savefigs:
+            savefig(f"{obs_typ}_err_pass_{i}", FIG_DIR, "q2", *subdirs)
 
     # Plot errors
     plt.figure()
@@ -236,11 +236,12 @@ def process_single_run(ukf_res: UkfResult, t_truth, X_truth, state_params, n_ign
     fig = plt.gcf()
     plt.xlabel("Time [hr]")
     fig.supylabel("Position Error [m]")
-    savefig(f"{obs_typ}_resids", FIG_DIR, "q2", *subdirs, )
+    if savefigs:
+        savefig(f"{obs_typ}_err", FIG_DIR, "q2", *subdirs)
 
 
 def process_2a(obs_typ="radar"):
-    MAX_VAR = 2e-5
+    condition = lambda ukf_result: ukf_result.filter_settings.Qeci[0, 0] < 1e-4
 
     t_truth, X_truth, state_params = read_truth_file(os.path.join(DATA_DIR, TRUTH_FILE))
 
@@ -264,14 +265,15 @@ def process_2a(obs_typ="radar"):
             print(f"Skipping {fname}")
             continue
 
-        process_single_run(obs_ukf, t_truth, X_truth, state_params, n_ignore_rms=20, plot=True, obs_typ=obs_typ)
-        var_eci = obs_ukf.filter_settings.Qeci[0, 0]
-
-        if var_eci < MAX_VAR:
+        if condition(obs_ukf):
+            process_single_run(obs_ukf, t_truth, X_truth, state_params, n_ignore_rms=20, plot=True, obs_typ=obs_typ)
+            var_eci = obs_ukf.filter_settings.Qeci[0, 0]
             rms_pos_hist.append(obs_ukf.rms_pos)
             rms_vel_hist.append(obs_ukf.rms_vel)
             rms_resids_hist.append(obs_ukf.rms_resids)
             var_eci_list.append(var_eci)
+        else:
+            print(f"Not using {fname}")
 
     sort = np.argsort(var_eci_list)
     var_eci_list = np.array(var_eci_list)[sort]
@@ -358,11 +360,26 @@ def optimise_2a(obs_typ="radar"):
     return
 
 
+def playground():
+    obs_meas = Measurement(RADAR_FILE)
+    ukf_settings = UkfSettings()
+    ukf_settings.Qeci = I3 * 1e-4
+    obs_ukf_raw = ukf_settings.run(obs_meas, verbose=False)
+    obs_ukf = UkfResult(obs_ukf_raw, ukf_settings)
+
+    t_truth, X_truth, state_params = read_truth_file(os.path.join(DATA_DIR, TRUTH_FILE))
+    process_single_run(obs_ukf, t_truth, X_truth, state_params, n_ignore_rms=20, plot=True, obs_typ="radar",
+                       savefigs=False)
+    plt.show()
+    return
+
+
 if __name__ == "__main__":
     # calc_2a('optical')
     # calc_2a('radar')
     # process_2a('optical')
     # process_2a('radar')
-    optimise_2a('optical')
+    # optimise_2a('optical')
+    playground()
 
     pass
