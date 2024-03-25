@@ -77,7 +77,7 @@ def detailed_propagation(objects_in, integrator_type):
         t0 = RSO_object['UTC']
         t0 = epoch_from_date_time_components(t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second)
 
-        tf = t0 + 3600 * 48          # 48 hours after the TCA
+        tf = t0 + 3600 * 24          # 24 hours after the TCA
 
         # Create time interval
         trange = np.array([t0, tf])
@@ -139,6 +139,12 @@ def detailed_propagation(objects_in, integrator_type):
 
             # create pandas dataframe with the dep_var_GPS_array and the tf_GPS array as the first column
             df = pd.DataFrame(data=dep_var_GPS_array, columns=['ax SRP [m/s^2]', 'ay SRP [m/s^2]', 'az SRP [m/s^2]', 'rx Sun [m]', 'ry Sun [m]', 'rz Sun [m]'])
+            df['x [m]'] = Xf_GPS[:, 0]
+            df['y [m]'] = Xf_GPS[:, 1]
+            df['z [m]'] = Xf_GPS[:, 2]
+            df['vx [m/s]'] = Xf_GPS[:, 3]
+            df['vy [m/s]'] = Xf_GPS[:, 4]
+            df['vz [m/s]'] = Xf_GPS[:, 5]
             df.insert(0, 'Time', tf_GPS)
 
             # save the dataframe to a csv file
@@ -163,6 +169,12 @@ def detailed_propagation(objects_in, integrator_type):
 
         # create pandas dataframe with the dep_var_GPS_array and the tf_GPS array as the first column
         df = pd.DataFrame(data=dep_var_debris_array, columns=['ax SRP [m/s^2]', 'ay SRP [m/s^2]', 'az SRP [m/s^2]', 'rx Sun [m]', 'ry Sun [m]', 'rz Sun [m]'])
+        df['x [m]'] = Xf_debris[:, 0]
+        df['y [m]'] = Xf_debris[:, 1]
+        df['z [m]'] = Xf_debris[:, 2]
+        df['vx [m/s]'] = Xf_debris[:, 3]
+        df['vy [m/s]'] = Xf_debris[:, 4]
+        df['vz [m/s]'] = Xf_debris[:, 5]
         df.insert(0, 'Time', tf_debris)
 
         # save the dataframe to a csv file
