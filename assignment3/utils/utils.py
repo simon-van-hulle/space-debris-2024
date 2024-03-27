@@ -5,7 +5,12 @@ import numpy as np
 from sklearn.utils import Bunch
 from tudatpy.kernel.astro import element_conversion
 import pickle
+import re
 
+
+########################################################################################################################
+# Logging
+########################################################################################################################
 
 def NAME(var):
     callers_local_vars = inspect.currentframe().f_back.f_back.f_locals.items()
@@ -50,11 +55,8 @@ def LOGVAR(var, format="10.5f", space=20):
 LV = LOGVAR
 
 
-## Debug
-
-
 def FILE() -> str:
-    # ptyhon has a native __file__
+    # python has a native __file__
     return inspect.currentframe().f_back.f_code.co_filename
 
 
@@ -63,8 +65,9 @@ def LINE() -> int:
     return inspect.currentframe().f_back.f_lineno
 
 
-## Figures
-
+########################################################################################################################
+# Files
+########################################################################################################################
 
 def process_filename(file_path, prepend="", postpend="", default_ext=".pdf"):
     fdir, fname = os.path.split(file_path)
@@ -77,59 +80,88 @@ def process_filename(file_path, prepend="", postpend="", default_ext=".pdf"):
     return processed_file_path
 
 
+def str_to_filename(name):
+    bracket_pattern = r"\(.*\)"
+    name = re.sub(bracket_pattern, "", name)
+    name = name.replace("\n", "")
+    return name.replace(" ", "_").lower()
+
+
+def process_dirs(*dirs):
+    the_dir = "."
+    for current_dir in dirs:
+        the_dir = os.path.join(the_dir, current_dir)
+        if not os.path.exists(the_dir):
+            os.makedirs(the_dir)
+    return the_dir
+
+
+def list_dir(*dirs):
+    the_dir = process_dirs(*dirs)
+    return sorted(os.listdir(the_dir))
+
+
+def save_pkl(fname, object, *dirs):
+    the_dir = process_dirs(*dirs)
+    filename = process_filename(fname, prepend="", postpend="", default_ext=".pkl")
+    with open(os.path.join(the_dir, filename), "wb") as f:
+        pickle.dump(object, f)
+    LOG(f"Saved object to {the_dir}/{filename}")
+
+
+def load_pkl(file_name, *dirs):
+    the_dir = "."
+    for current_dir in dirs:
+        the_dir = os.path.join(the_dir, current_dir)
+    filename = process_filename(file_name, prepend="", postpend="", default_ext=".pkl")
+    with open(os.path.join(the_dir, filename), "rb") as f:
+        return pickle.load(f)
+
+
+def load_np_txt(data_path: str, *args):
+    """Load all files in a directory"""
+    files = {}
+    for var in args:
+        files[var] = np.loadtxt(f"{data_path}/{var}.txt")
+
+    if len(args) == 1:
+        return files[args[0]]
+
+    return Bunch(**files)
+
+
+def dump_np_txt(data_path: str, array, name):
+    np.savetxt(f"{data_path}/{name}.txt", array)
+    LOG(f"Dumped {name} to {data_path}/{name}.txt")
+
+
+########################################################################################################################
+# Figures
+########################################################################################################################
+
 def savefig(filename, *dirs, fig=None, close=True, append_size=True, tight_layout=True, **kwargs):
     """Save a figure with the given filename and directories"""
-    thedir = "."
+    the_dir = process_dirs(*dirs)
+
     fig = fig or plt.gcf()
     if tight_layout:
         fig.tight_layout()
-
-    for dir in dirs:
-        thedir = os.path.join(thedir, dir)
-        if not os.path.exists(thedir):
-            os.makedirs(thedir)
 
     if append_size:
         size_x, size_y = fig.get_size_inches()
         size_str = f"_{size_x:.1f}x{size_y:>.1f}"
 
-    filename = process_filename(filename, prepend="", postpend=size_str, default_ext=".pdf")
+    filename = process_filename(filename, prepend="", postpend=size_str, default_ext=".png")
 
-    fig.savefig(os.path.join(thedir, filename), bbox_inches="tight", **kwargs)
-    LOG(f"Saved figure to {thedir}/{filename}")
+    fig.savefig(os.path.join(the_dir, filename), bbox_inches="tight", **kwargs)
+    LOG(f"Saved figure to {the_dir}/{filename}")
     if close:
         plt.close(fig)
 
 
-def savepkl(fname, ojbect, *dirs):
-    thedir = "."
-    for dir in dirs:
-        thedir = os.path.join(thedir, dir)
-        if not os.path.exists(thedir):
-            os.makedirs(thedir)
-    filename = process_filename(fname, prepend="", postpend="", default_ext=".pkl")
-    with open(os.path.join(thedir, filename), "wb") as f:
-        pickle.dump(ojbect, f)
-    LOG(f"Saved object to {thedir}/{filename}")
+def fig_note(text, fontsize=3):
+    """Add a tiny note to the current figure"""
 
-
-def loadpkl(fname, *dirs):
-    thedir = "."
-    for dir in dirs:
-        thedir = os.path.join(thedir, dir)
-    filename = process_filename(fname, prepend="", postpend="", default_ext=".pkl")
-    with open(os.path.join(thedir, filename), "rb") as f:
-        return pickle.load(f)
-
-
-def list_dir(*dirs):
-    thedir = "."
-    for dir in dirs:
-        thedir = os.path.join(thedir, dir)
-    return sorted(os.listdir(thedir))
-
-
-def fignote(text, fontsize=3):
     if plt.gca().name == "3d":
         plt.gca().text(1, 1, 1, f"Note: {text}", fontsize=fontsize, ha="right", va="bottom",
                        transform=plt.gca().transAxes)
@@ -137,7 +169,9 @@ def fignote(text, fontsize=3):
         plt.text(1, 1, f"Note: {text}", fontsize=fontsize, ha="right", va="bottom", transform=plt.gca().transAxes)
 
 
-## Some helper functions
+########################################################################################################################
+# Math and Data
+########################################################################################################################
 
 
 def s2hr(s: np.ndarray):
@@ -152,6 +186,10 @@ def s2yr(s: np.ndarray):
     return s / 31557600.0
 
 
+def rad2arcsec(rad: np.ndarray):
+    return rad * 180 / np.pi * 3600.0
+
+
 def print_matlab(arr):
     string = "[ "
     for a in arr:
@@ -160,35 +198,7 @@ def print_matlab(arr):
     return string
 
 
-## Files
-
-
-def load_files(data_path: str, *args):
-    """Load all files in a directory"""
-    files = {}
-    for var in args:
-        files[var] = np.loadtxt(f"{data_path}/{var}.txt")
-
-    if len(args) == 1:
-        return files[args[0]]
-
-    return Bunch(**files)
-
-
-def dump_file(data_path: str, array, name):
-    np.savetxt(f"{data_path}/{name}.txt", array)
-    LOG(f"Dumped {name} to {data_path}/{name}.txt")
-
-
-def load_trv(data_path: str):
-    t = np.loadtxt(f"{data_path}/t.txt")
-    r = np.loadtxt(f"{data_path}/r.txt").T
-    v = np.loadtxt(f"{data_path}/v.txt").T
-
-    return t, r, v
-
-
-def make_latex_table(data_array: np.ndarray) -> str:
+def np2latex_table(data_array: np.ndarray) -> str:
     """Make a latex table from a 2D array"""
     table = ""
     for row in data_array:
@@ -197,19 +207,17 @@ def make_latex_table(data_array: np.ndarray) -> str:
     return table
 
 
-def make_dir_name(name):
-    return name.replae(" ", "-").lower()
+########################################################################################################################
+# Vector and Matrix
+########################################################################################################################
 
 
-# Vectors
-
-
-def col_vec(array, rowsrequired=None):
+def col_vec(array, rows_required=None):
     if len(array.shape) == 1:
         array = array.reshape(-1, 1)
 
-    if rowsrequired is not None and array.shape[0] != rowsrequired:
-        raise ValueError(f"Array must have {rowsrequired} rows")
+    if rows_required is not None and array.shape[0] != rows_required:
+        raise ValueError(f"Array must have {rows_required} rows")
 
     return array
 

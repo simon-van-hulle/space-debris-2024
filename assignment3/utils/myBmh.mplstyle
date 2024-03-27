@@ -32,6 +32,4 @@ ytick.direction: in
 lines.markerfacecolor: eeeeee
 
 
-
-figure.figsize: 6, 4
 figure.dpi: 600
