@@ -13,13 +13,13 @@ from datetime import datetime
 json_file = 'group4_sensor_tasking_file.json'
 
 # Sensor type is a string, either 'radar' or 'optical'
-sensor_type = 'radar'
-#sensor_type = 'optical'
+# sensor_type = 'radar'
+sensor_type = 'optical'
 
-# Sensor location
-latitude_radians = np.deg2rad(10.)
-longitude_radians = np.deg2rad(20.)
-height_meters = 30.
+# Sensor location: data for Diego Garcia GEODSS
+latitude_radians = np.deg2rad(7.411754)
+longitude_radians = np.deg2rad(72.452285)
+height_meters = -73.58 + 1.2192
 
 # Indicate start times and object IDs for each task.
 # You must ensure that sensor constraints are met.
@@ -34,44 +34,44 @@ height_meters = 30.
 # Round times to nearest second
 
 # Task 1
-task1_start_UTC = datetime(2000, 1, 1, 12, 0, 0)
-task1_object_id = 10001
+task1_start_UTC = datetime(2024, 3, 22, 0, 27, 30)
+task1_object_id = 91104
 
 # Task 2
-task2_start_UTC = datetime(2000, 1, 2, 12, 0, 0)
-task2_object_id = 10002
+task2_start_UTC = datetime(2024, 3, 22, 0, 22, 20)
+task2_object_id = 91861
 
 # Task 3
-task3_start_UTC = datetime(2000, 1, 3, 12, 0, 0)
-task3_object_id = 10003
+task3_start_UTC = datetime(2024, 3, 22, 0, 17, 10)
+task3_object_id = 91787
 
 # Task 4
-task4_start_UTC = datetime(2000, 1, 4, 12, 0, 0)
-task4_object_id = 10004
+task4_start_UTC = datetime(2024, 3, 21, 23, 36, 10)
+task4_object_id = 91401
 
 # Task 5
-task5_start_UTC = datetime(2000, 1, 5, 12, 0, 0)
-task5_object_id = 10005
+task5_start_UTC = datetime(2024, 3, 21, 20, 27, 10)
+task5_object_id = 91821
 
 # Task 6
-task6_start_UTC = datetime(2000, 1, 6, 12, 0, 0)
-task6_object_id = 10006
+task6_start_UTC = datetime(2024, 3, 21, 19, 14, 10)
+task6_object_id = 91518
 
 # Task 7
-task7_start_UTC = datetime(2000, 1, 7, 12, 0, 0)
-task7_object_id = 10007
+task7_start_UTC = datetime(2024, 3, 21, 18, 37, 50)
+task7_object_id = 91368
 
 # Task 8
-task8_start_UTC = datetime(2000, 1, 8, 12, 0, 0)
-task8_object_id = 10008
+task8_start_UTC = datetime(2024, 3, 21, 18, 32, 40)
+task8_object_id = 91714
 
 # Task 9
-task9_start_UTC = datetime(2000, 1, 9, 12, 0, 0)
-task9_object_id = 10009
+task9_start_UTC = datetime(2024, 3, 21, 18, 26, 30)
+task9_object_id = 91447
 
 # Task 10
-task10_start_UTC = datetime(2000, 1, 10, 12, 0, 0)
-task10_object_id = 10010
+task10_start_UTC = datetime(2024, 3, 21, 15, 13, 40)
+task10_object_id = 91438
 
 
 
