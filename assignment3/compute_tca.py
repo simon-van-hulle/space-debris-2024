@@ -3,6 +3,7 @@ from tudatpy.kernel.astro import element_conversion
 from TudatPropagator import propagate_state_and_covar, propagate_orbit
 from ConjunctionUtilities import compute_TCA
 from tudatpy.numerical_simulation import environment
+from tudatpy.astro import frame_conversion
 import TudatPropagator as prop
 
 import os
@@ -121,6 +122,8 @@ def get_TCA(objects_in, integrator_type):
         print("Computing TCA for object", key, "using", integrator_type, "integrator")
         Ts, rhos = compute_TCA(X1, X2, trange, rso1_params, rso2_params,
                                        int_params, bodies)
+        
+        
 
         # Append results to list
         TCA_list.append(Ts)

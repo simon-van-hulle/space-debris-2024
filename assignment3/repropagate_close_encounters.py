@@ -33,7 +33,7 @@ min_step_rkf78 = 1    # minimum step size
 atol_rkf78 = 1e-8     # absolute tolerance
 rtol_rkf78 = 1e-8     # relative tolerance
 
-file_path = "results_tca_updated.csv"
+file_path = 'results_tca_updated.csv'
 data_TCA = pd.read_csv(file_path)
 
 # filter out the objects with a miss distance higher than 10km
@@ -45,7 +45,7 @@ def read_pkl(file_path):
         data = pkl.load(f)
     return data
 
-file_path_RSO_catalog = "data\group4\estimated_rso_catalog.pkl"
+file_path_RSO_catalog = "assignment3\data\group4\estimated_rso_catalog.pkl"
 data_RSO_catalog = read_pkl(file_path_RSO_catalog)[0]
 keys_RSO_catalog = data_RSO_catalog.keys()
 

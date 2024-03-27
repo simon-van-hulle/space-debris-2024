@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pickle as pkl
 import TudatPropagator as prop
+from tudatpy.astro import frame_conversion
 from scipy.integrate import dblquad
 
 
@@ -272,9 +273,9 @@ def create_metrics_files():
         # extract the key from the JSON file
         key = int(JSON_file.split(".")[0])
 
-        if key != 91861:
-            print(f'skipped {key}')
-            continue
+        # if key != 91861:
+        #     print(f'skipped {key}')
+        #     continue
 
         # get the data from the JSON file
         times, states, covariances = read_JSON_file(f"JSON_files\\{JSON_file}")
@@ -348,6 +349,10 @@ def create_metrics_files():
         d_eucl_array = np.zeros(len(times_short))
         d_maha_array = np.zeros(len(times_short))
         Pc_array = np.zeros(len(times_short))
+        rel_pos_rsw = np.zeros((3,len(times_short)))
+        rel_vel_rsw = np.zeros((3,len(times_short)))
+        
+        
 
         # loop over the times and compute the metrics
         for i, t in enumerate(times_short):
@@ -355,18 +360,45 @@ def create_metrics_files():
             d_eucl = compute_euclidean_distance(states_short[i][:3], GPS_states_short[i][:3])
             d_maha = compute_mahalanobis_distance(states_short[i], GPS_states_short[i], covariances_short[i], GPS_covariances_short[i])
             Pc = Pc2D_Foster(states_short[i], covariances_short[i], GPS_states_short[i], GPS_covariances_short[i], HBR)
+            
+            X1 = GPS_states_short[i]
+            X2 = states_short[i]
+            RSW_1 = frame_conversion.inertial_to_rsw_rotation_matrix(X1)
+            Sat_in_RSW_pos = RSW_1 @ X1[0:3]
+            Debris_in_RSW_pos = RSW_1 @ X2[0:3]
+            RSW_DIFF_pos = Sat_in_RSW_pos - Debris_in_RSW_pos
+
+            Sat_in_RSW_vel = RSW_1 @ X1[3:]
+            Debris_in_RSW_vel = RSW_1 @ X2[3:]
+            RSW_DIFF_vel= Sat_in_RSW_vel - Debris_in_RSW_vel
+
 
             # save the results to the arrays
             d_eucl_array[i] = d_eucl
             d_maha_array[i] = d_maha
             Pc_array[i] = Pc
+            rel_pos_rsw[:,i] = RSW_DIFF_pos
+            rel_vel_rsw[:,i] = RSW_DIFF_vel
 
+        
+        Pc_sci = [f"{x:.2e}" for x in Pc_array]
         # save the results to a dataframe
         df = pd.DataFrame()
         df['Times'] = times_short
         df['Euclidean Distance [m]'] = d_eucl_array
         df['Mahalanobis Distance [m]'] = d_maha_array
-        df['Pc'] = Pc_array.round(15)
+        df['Pc'] = Pc_sci
+        df['Euclidean Position Debris [m]'] = states_short[:,:3].tolist()
+        df['Euclidean Velocity Debris [m/s]'] = states_short[:,3:].tolist()
+        df['Euclidean Position GPS [m]'] = GPS_states_short[:,:3].tolist()
+        df['Euclidean Velocity GPS [m/s]'] = GPS_states_short[:,3:].tolist()
+        df['Relative Position RSW [m]'] = rel_pos_rsw.T.tolist() 
+        df['Relative Velocity RSW [m/s]'] = rel_vel_rsw.T.tolist()
+        df['Covariance Debris'] = covariances_short.tolist()
+        df['Covariance GPS'] = GPS_covariances_short.tolist()
+
+        
+        
 
 
         # save the dataframe to a csv file
@@ -374,7 +406,7 @@ def create_metrics_files():
 
 
 # Create metrics files
-# create_metrics_files()
+create_metrics_files()
 
 
 ############################################################################################################
@@ -403,23 +435,46 @@ for i, file in enumerate(os.listdir("metrics")):
     d_eucl_accurate = df['Euclidean Distance [m]'][idx]
     d_maha_accurate = df['Mahalanobis Distance [m]'][idx]
     Pc_accurate = df['Pc'][idx]
+    position_accurate_debris = df['Euclidean Position Debris [m]'][idx]
+    velocity_accurate_debris = df['Euclidean Velocity Debris [m/s]'][idx]
+    rel_pos_rsw_accurate = df['Relative Position RSW [m]'][idx]
+    rel_vel_rsw_accurate = df['Relative Velocity RSW [m/s]'][idx]
+    position_accurate_GPS = df['Euclidean Position GPS [m]'][idx]
+    velocity_accurate_GPS = df['Euclidean Velocity GPS [m/s]'][idx]
+    covar_debris = df['Covariance Debris'][idx]
+    covar_GPS = df['Covariance GPS'][idx]
+    
+    
 
-    # create Conjuction Data Message dictionary
-    CDM = pd.DataFrame()
-    CDM['CDM ID'] = i
-    CDM['Creation Time'] = datetime.datetime(2024, 3, 21, 12, 0)
-    CDM['Danger Flag'] = "yes"
-    CDM['TCA since J2000 [s]'] = TCA_accurate
-    CDM['Euclidean miss distance'] = d_eucl_accurate
-    CDM['Mahalanobis miss distance'] = d_maha_accurate
-    CDM['Probability of collision'] = Pc_accurate
-    CDM['NORAD ID 1'] = 36585
-    CDM['NORAD ID 2'] = key
-    CDM['Radar Cross-Section 1 [m^2]'] = GPS_data['area']
-    CDM['Radar Cross-Section 2 [m^2]'] = RSO_data['area']
-    CDM['Volume 1 [m^3]'] = 4/3 * math.pi * (np.sqrt(GPS_data['area']/math.pi))**3
-    CDM['Volume 2 [m^3]'] = 4/3 * math.pi * (np.sqrt(RSO_data['area']/math.pi))**3
+    CDM_data = {
+        'CDM ID': [i],
+        'Creation Time': [datetime.datetime(2024, 3, 21, 12, 0)],
+        'Danger Flag': ["yes"],
+        'TCA since J2000 [s]': [TCA_accurate],
+        'Euclidean miss distance': [d_eucl_accurate],
+        'Mahalanobis miss distance': [d_maha_accurate],
+        'Probability of collision': [Pc_accurate],
+        'NORAD ID 1': [36585],
+        'NORAD ID 2': [key],
+        'Radar Cross-Section 1 [m^2]': [GPS_data.get('area', np.nan)],  # Use np.nan for missing values
+        'Radar Cross-Section 2 [m^2]': [RSO_data.get('area', np.nan)],
+        'Volume 1 [m^3]': [4/3 * math.pi * (np.sqrt(GPS_data.get('area', np.nan)/math.pi))**3],
+        'Volume 2 [m^3]': [4/3 * math.pi * (np.sqrt(RSO_data.get('area', np.nan)/math.pi))**3],
+        'Position 1 [m]': [position_accurate_GPS],
+        'Position 2 [m]': [position_accurate_debris],
+        'Velocity 1 [m/s]': [velocity_accurate_GPS],
+        'Velocity 2 [m/s]': [velocity_accurate_debris],
+        'Covariance 1': [covar_GPS],
+        'Covariance 2': [covar_debris],
+        'Relative Position RSW [m]': [rel_pos_rsw_accurate],
+        'Relative Velocity RSW [m/s]': [rel_vel_rsw_accurate]
+        }
+    # Create DataFrame from dictionary
+    CDM = pd.DataFrame(CDM_data)
 
+    # Save the DataFrame to a CSV file
+    CDM.to_csv(f"metrics/CDM_{key}.csv", index=False)  # Adjust path separator as per your OS
+    print(f'CDM_{key}.csv saved successfully.')
     print('break')
 
 
