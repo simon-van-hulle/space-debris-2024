@@ -6,6 +6,8 @@ __pycache__/
 output/
 figures/
 *_model/
+*fig
+*cache
 
 # C extensions
 *.so
