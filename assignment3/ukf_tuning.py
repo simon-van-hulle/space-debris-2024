@@ -5,13 +5,14 @@ from utils.style import *
 from utils.utils import *
 import pickle
 import os
+import sys
+sys.path.append('assignment2')
 from EstimationUtilities import *
-from assignment2.BreakupUtilities import *
+from BreakupUtilities import *
 from tudatpy.astro import frame_conversion
 from sklearn.utils import Bunch
 from dataclasses import dataclass
 import time
-import sys
 import copy
 
 ########################################################################################################################
