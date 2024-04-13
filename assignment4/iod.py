@@ -84,6 +84,8 @@ def within_limits(value, limits):
 def sec_j2000_to_datetime(sec_j2000):
     return datetime(2000, 1, 1) + timedelta(seconds=sec_j2000)
 
+def datetime_to_sec_j2000(dt):
+    return (dt - datetime(2000, 1, 1)).total_seconds()
 
 def get_kepler_interpolation(state, n_steps=100):
     kep_state = element_conversion.cartesian_to_keplerian(state, MU_EARTH)
