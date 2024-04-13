@@ -51,7 +51,8 @@ ukf_results = []
 
 # Loop through each file in the directory and process it with the provided function
 for filename in os.listdir(directory_path):
-    if filename.endswith('.pkl'):
+    if filename.endswith('.pkl') and filename == 'q3_meas_rso_99004.pkl':
+        print(filename)
         filepath = os.path.join(directory_path, filename)
         
         # Read the measurement file
@@ -61,7 +62,6 @@ for filename in os.listdir(directory_path):
         ukf_result = EstimationUtilities.ukf(state_params, meas_dict, sensor_params, intsettings, filter_params, bodies)
         
         # Append the result of the UKF for this file to the results list
-        print(ukf_result)
         ukf_results.append({
             'filename': filename,
             'ukf_result': ukf_result
