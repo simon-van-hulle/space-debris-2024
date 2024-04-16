@@ -2,9 +2,9 @@
 Initial Orbit Determination
 """
 
-####################################################################################################
+###############################################################################
 # Imports
-####################################################################################################
+###############################################################################
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -16,27 +16,31 @@ from tudatpy.astro.two_body_dynamics import LambertTargeterIzzo, propagate_keple
 from tudatpy.interface import spice
 from tudatpy import constants
 from tudatpy.astro import element_conversion
+from tudatpy.numerical_simulation import environment
 
 from sutils.utils import *
 from sutils.logging import *
 from sutils.style import *
 
+from scipy.stats import gaussian_kde
+import seaborn as sns
 
-####################################################################################################
+###############################################################################
 # Setup
-####################################################################################################
+###############################################################################
 
 mpl.use("tkagg")
 np.set_printoptions(linewidth=150, suppress=True, threshold=np.inf, formatter={"float": "{: 0.5E}".format})
 
 
-def savefig(*args, **kwargs):
-    return
+# def savefig(*args, **kwargs):
+#     WARN("IGNORING SAVEFIG")
+#     return
 
 
-####################################################################################################
+###############################################################################
 # Constants
-####################################################################################################
+###############################################################################
 
 FILE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = f"{FILE_DIR}/data/group4"
@@ -53,9 +57,9 @@ MU_EARTH = 3.986004418e14  # m^3/s^2
 R_EARTH = 6378000
 ARCSEC = np.deg2rad(1 / 3600)
 
-####################################################################################################
+###############################################################################
 # Defaults
-####################################################################################################
+###############################################################################
 
 DEFAULT_STATE_PARAMS = {
     "UTC": None,
@@ -72,9 +76,9 @@ DEFAULT_STATE_PARAMS = {
 }
 
 
-####################################################################################################
+###############################################################################
 # Utility Functions
-####################################################################################################
+###############################################################################
 
 
 def within_limits(value, limits):
@@ -84,8 +88,10 @@ def within_limits(value, limits):
 def sec_j2000_to_datetime(sec_j2000):
     return datetime(2000, 1, 1) + timedelta(seconds=sec_j2000)
 
+
 def datetime_to_sec_j2000(dt):
     return (dt - datetime(2000, 1, 1)).total_seconds()
+
 
 def get_kepler_interpolation(state, n_steps=100):
     kep_state = element_conversion.cartesian_to_keplerian(state, MU_EARTH)
@@ -157,9 +163,9 @@ def shiftedColorMap(cmap, start=0, midpoint=0.5, stop=1.0, name="testcmap"):
     return newcmap
 
 
-####################################################################################################
+###############################################################################
 # Data structures
-####################################################################################################
+###############################################################################
 
 
 class RsoFile:
@@ -235,9 +241,9 @@ def make_state_param_dict(
     return state_params
 
 
-####################################################################################################
+###############################################################################
 # Gooding Method
-####################################################################################################
+###############################################################################
 
 
 def calc_rho_hat(ra, dec):
@@ -501,13 +507,19 @@ class GoodingIodMonteCarlo:
         self.state_cov = np.cov(np.array(self.initial_states).T)
 
 
-####################################################################################################
+###############################################################################
 # Plotting
-####################################################################################################
+###############################################################################
 
 
-def plot_covariance(Cov, labels=None):
-    plt.figure()
+def plot_covariance(Cov, ax=None, cbar_label=r"Covariance [m$^2$]", labels=None):
+    # plt.figure()
+    if ax is None:
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+    else:
+        fig = ax.get_figure()
+
     plt.title("Covariance Matrix")
 
     min_val = np.min(Cov)
@@ -517,12 +529,14 @@ def plot_covariance(Cov, labels=None):
     max_val += 0.01 * val_range
     zero_point = np.max([-min_val, 0]) / val_range
 
-    SHIFTED_VIRIDIS = shiftedColorMap(mpl.cm.RdBu, midpoint=zero_point, name="shifted")
-    im = plt.imshow(Cov, cmap=SHIFTED_VIRIDIS)
+    SHIFTED_CMAP = shiftedColorMap(mpl.cm.RdBu, midpoint=zero_point, name="shifted")
+    # im = plt.imshow(Cov, cmap=SHIFTED_CMAP)
+    im = plt.imshow(Cov, cmap="RdBu")
     cbar = plt.colorbar(im)
-    cbar.set_label("Covariance [variable units]")
 
     N = len(Cov)
+    cbar.set_label(cbar_label)
+
     if labels:
         if len(labels) != N:
             WARN("Labels must be the same length as the covariance matrix")
@@ -567,6 +581,44 @@ def plot_cov_ellipsoid(state, Cov, scaling_factor=1, ax=None, *args, **kwargs):
     return fig, ax
 
 
+def scatter_3d_with_projection(x, y, z, ax=None, *args, **kwargs):
+    if ax is None:
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection="3d")
+    else:
+        fig = ax.get_figure()
+
+    ax.scatter(x, y, z, *args, **kwargs)
+
+    y_boundary = np.min(y) - 0.2 * np.ptp(y)
+    x_boundary = np.min(x) - 0.2 * np.ptp(x)
+    z_boundary = np.min(z) - 0.2 * np.ptp(z)
+
+    yz = np.vstack([y, z])
+    xy = np.vstack([x, z])
+    xz = np.vstack([x, y])
+
+    colx = gaussian_kde(yz)(yz)
+    coly = gaussian_kde(xz)(xz)
+    colz = gaussian_kde(xy)(xy)
+
+    ax.scatter(y, z, c=colx, zdir="x", zs=x_boundary)
+    ax.scatter(x, z, c=coly, zdir="y", zs=y_boundary)
+    ax.scatter(x, y, c=colz, zdir="z", zs=z_boundary)
+
+    ax.set_ylim(ymin=y_boundary)
+    ax.set_xlim(xmin=x_boundary)
+    ax.set_zlim(zmin=z_boundary)
+
+    ax.view_init(elev=30, azim=50, roll=0)
+
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_zlabel("z")
+
+    return fig, ax
+
+
 def plot_kepler_interpolation(state, n_steps=100, *args, **kwargs):
     ax = plt.gca()
     states = get_kepler_interpolation(state, n_steps)
@@ -599,7 +651,7 @@ def plot_state_cov_earth(state, cov, ax=None):
     return fig, ax
 
 
-def plot_aod_solution(aod, range1, range3, ax=None):
+def plot_aod_solution(aod, range1, range3, ax=None, all_labels=True, **main_kwargs):
     r1_vec, r3_vec = aod.r1_r3_vec(range1, range3)
 
     rho_2_calc = aod.calc_rho2_vec(range1, range3)
@@ -619,27 +671,37 @@ def plot_aod_solution(aod, range1, range3, ax=None):
     else:
         fig = ax.get_figure()
 
+    # add range points
+    m_size = 10
+    ax.scatter(*r1_vec[1, :] / 1000, color="k", s=m_size)
+    ax.scatter(*r3_vec[1, :] / 1000, color="k", s=m_size)
+
     plt.title("AOD Solution\n" rf"$\rho_1=${range1 / 1000:.1f} km, $\rho_3 =${range3 / 1000:.2f} km")
-    ax.plot(*r1_vec.T / 1000, label="Measurements", color="k", linewidth=0.5)
+    ax.plot(*r1_vec.T / 1000, label="Measurements" if all_labels else None, color="k", linewidth=0.5)
     ax.plot(*r2_vec.T / 1000, color="k", linewidth=0.5)
     ax.plot(*r3_vec.T / 1000, color="k", linewidth=0.5)
-    ax.plot(*r2_vec_calc.T / 1000, label=r"Calculated $\boldsymbol{\rho}_2$", color="r", linestyle="--", linewidth=0.5)
-    ax.plot(*states[:, :3].T / 1000, label="Calculated orbit")
+    ax.plot(
+        *r2_vec_calc.T / 1000,
+        label=r"Calculated $\boldsymbol{\rho}_2$" if all_labels else None,
+        color="r",
+        linestyle="--",
+        linewidth=0.5,
+    )
+    ax.plot(*states[:, :3].T / 1000, **main_kwargs)
     ax.set_xlabel("x [km]")
     ax.set_ylabel("y [km]")
     ax.set_zlabel("z [km]")
 
-    plot_sphere(radius=R_EARTH / 1000, label="Earth")
+    plot_sphere(radius=R_EARTH / 1000, label="Earth" if all_labels else None)
     ax.legend()
 
     ax.set_aspect("equal")
-    plt.tight_layout()
     return fig, ax
 
 
-####################################################################################################
+###############################################################################
 # Testing
-####################################################################################################
+###############################################################################
 
 
 def test_cov_plot():
@@ -676,9 +738,29 @@ def test_process_rso(filename="q4_meas_rso_91447.pkl"):
     savefig("rso_covariance.pdf", FIG_DIR, "tmp", close=False)
 
 
-####################################################################################################
+def draw_3d_frame(ax, color="k", **kwargs):
+
+    def new_lim(lims):
+        diff = lims[1] - lims[0]
+        return [lims[0] - diff * 0.01, lims[1] + diff * 0.01]
+
+    xlim = new_lim(ax.get_xlim())
+    ylim = new_lim(ax.get_ylim())
+    zlim = new_lim(ax.get_zlim())
+
+    ax.plot(xlim, [ylim[0], ylim[0]], [zlim[0], zlim[0]], linewidth=1, color=color, **kwargs)
+    ax.plot(xlim, [ylim[0], ylim[0]], [zlim[1], zlim[1]], linewidth=1, color=color, **kwargs)
+
+    ax.plot([xlim[0], xlim[0]], ylim, [zlim[0], zlim[0]], linewidth=1, color=color, **kwargs)
+    ax.plot([xlim[0], xlim[0]], ylim, [zlim[1], zlim[1]], linewidth=1, color=color, **kwargs)
+
+    ax.plot([xlim[0], xlim[0]], [ylim[0], ylim[0]], zlim, linewidth=1, color=color, **kwargs)
+    ax.plot([xlim[0], xlim[0]], [ylim[1], ylim[1]], zlim, linewidth=1, color=color, **kwargs)
+
+
+###############################################################################
 # Main
-####################################################################################################
+###############################################################################
 
 
 def simple():
@@ -687,7 +769,7 @@ def simple():
     meas = RsoFile(IOD_MEAS_PATH)
     aod = AnglesOnlyData.from_iod_measurement(meas)
 
-    ## GOODING METHOD ################################################################################################
+    ## GOODING METHOD #########################################################
 
     rho1 = 18e6
     rho3 = 25e6
@@ -712,7 +794,7 @@ def aod_monte_carlo(n_samples=100):
     meas = RsoFile(IOD_MEAS_PATH)
     aod = AnglesOnlyData.from_iod_measurement(meas)
 
-    ## GOODING METHOD ################################################################################################
+    ## GOODING METHOD #########################################################
 
     rho1 = 10e6
     rho3 = 20e6
@@ -726,14 +808,17 @@ def aod_monte_carlo(n_samples=100):
 def process_monte_carlo():
     mc = load_pkl(f"{CACHE_DIR}/aod_monte_carlo.pkl")
     rso = RsoFile(IOD_MEAS_PATH)
+    figdirs = [FIG_DIR, "monte_carlo"]
 
     SECTION("Update RSO")
     rso.state_params = DEFAULT_STATE_PARAMS.copy()
-    rso.state_params.update({
-        "UTC": sec_j2000_to_datetime(rso.tk[0]),
-        "state": mc.initial_state,
-        "covar": mc.state_cov,
-    })
+    rso.state_params.update(
+        {
+            "UTC": sec_j2000_to_datetime(rso.tk[0]),
+            "state": mc.initial_state,
+            "covar": mc.state_cov,
+        }
+    )
 
     rso.save(DATA_DIR, filename=IOD_RESULT_FILENAME)
 
@@ -741,40 +826,60 @@ def process_monte_carlo():
     print("Initial State: ", mc.initial_state)
     LOG("Covariance: \n", mc.state_cov)
 
-    plot_covariance(mc.state_cov[:3, :3], labels=["x", "y", "z"])
-    savefig("aod_covariance.pdf", FIG_DIR, close=False)
+    fig, ax = plt.subplots(1, 1, figsize=(2.3, 2))
+    plot_covariance(mc.state_cov[:3, :3], ax=ax, labels=["x", "y", "z"])
+    savefig("aod_covariance.pdf", *figdirs, close=False)
 
     # RIC covariance
     rot = get_inertial_to_ric_matrix(mc.initial_state)
     rot = np.block([[rot, np.zeros((3, 3))], [np.zeros((3, 3)), rot]])
+    states_ric = np.array([rot @ state for state in mc.initial_states])
     state_cov_ric = rot @ mc.state_cov @ rot.T
-    plot_covariance(state_cov_ric[:3, :3], labels=["r", "i", "c"])
-    savefig("aod_covariance_ric.pdf", FIG_DIR, close=False)
+    fig, ax = plt.subplots(1, 1, figsize=(2.3, 2))
+    plot_covariance(state_cov_ric[:3, :3], ax=ax, labels=["R", "I", "C"])
+    savefig("aod_covariance_ric.pdf", *figdirs, close=False)
 
-    fig, ax = plot_aod_solution(mc.aod, mc.rho1_list[-1], mc.rho3_list[-1])
+    fig, ax = plt.subplots(1, 1, figsize=(2.3, 2))
+    plot_covariance(
+        state_cov_ric[3:, 3:], ax=ax, cbar_label=r"Covariance [m$^2$/s$^2$]", labels=[r"$v_R$", r"$v_I$", r"$v_C$"]
+    )
+    savefig("aod_covariance_ric_vel.pdf", *figdirs, close=False)
+
+    plot_cov_ellipsoid(np.zeros(3), mc.state_cov, scaling_factor=1e-3)
+    savefig("cov_ellipsoid.pdf", *figdirs, close=False)
+
+    fig, ax = plot_aod_solution(mc.aod, mc.rho1, mc.rho3)
     plot_cov_ellipsoid(mc.initial_state, mc.state_cov, scaling_factor=1e-3, ax=ax, alpha=0.5)
+    savefig("aod_ellipsoid.pdf", *figdirs, close=False)
 
-    savefig("aod_ellipsoid.pdf", FIG_DIR, close=False)
+    # Plot AOD solution
+    fig = plt.figure(figsize=(6, 4))
+    ax = fig.add_subplot(111, projection="3d")
+    plot_aod_solution(mc.aod, 10e6, 20e6, ax=ax, all_labels=False, label="Initial Guess")
+    plot_aod_solution(mc.aod, mc.rho1, mc.rho3, ax=ax, all_labels=True, label="Converged Orbit")
+    plt.legend(loc="upper left", bbox_to_anchor=(1, 1))
+    ax.view_init(elev=30, azim=160, roll=0)
+
+    savefig("aod_final.pdf", *figdirs, close=False)
 
     # Rho histogram
-    plt.figure()
+    plt.figure(figsize=(3, 2.5))
     plt.title("Range Histogram")
-    plt.hist(np.array(mc.rho1_list) / 1000, bins=20, alpha=0.5, label=r"$\rho_1$", edgecolor="k")
-    plt.hist(np.array(mc.rho3_list) / 1000, bins=20, alpha=0.5, label=r"$\rho_3$", edgecolor="k")
+    plt.hist(
+        np.array(mc.rho1_list) / 1000, bins=10, alpha=0.5, label=r"$\rho_1$", edgecolor="k", zorder=10, linewidth=0.1
+    )
+    plt.hist(
+        np.array(mc.rho3_list) / 1000, bins=10, alpha=0.5, label=r"$\rho_3$", edgecolor="k", zorder=10, linewidth=0.1
+    )
     plt.xlabel("Range [km]")
     plt.ylabel("Occurrences")
     plt.legend()
 
-    savefig("aod_histogram.pdf", FIG_DIR, close=False)
+    savefig("aod_histogram.pdf", *figdirs, close=False)
 
-
-def process_monte_carlo_tmp():
-    mc = load_pkl(f"{CACHE_DIR}/aod_monte_carlo.pkl")
-    rso = RsoFile(IOD_MEAS_PATH)
-
+    # Plot all realisations ###################################################
     fig = plt.figure()
     ax = fig.add_subplot(111, projection="3d")
-
     cov = mc.state_cov * 0
     fig, ax = plot_state_cov_earth(mc.initial_state, cov, ax=ax)
     i = 0
@@ -787,8 +892,106 @@ def process_monte_carlo_tmp():
             break
 
     ax.set_aspect("equal")
+    plt.legend(loc="upper left", bbox_to_anchor=(1, 1))
+    ax.view_init(elev=30, azim=160, roll=0)
+    savefig("aod_monte_carlo_all.pdf", *figdirs, close=False)
+
+    # Scatter plot all realisations with projection ###########################
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    scatter_3d_with_projection(*(np.array(mc.initial_states - mc.initial_state).T[:3] / 1e3), ax=ax)
+    ax.set_aspect("equal")
+    draw_3d_frame(ax)
+    ax.set_xlabel("x [km]")
+    ax.set_ylabel("y [km]")
+    ax.set_zlabel("z [km]")
+    savefig("aod_monte_carlo_scatter.pdf", *figdirs, pad_inches=0.3, close=False)
+
+    # Scatter plot all ric realisations with projection #######################
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    mean_state_ric = np.mean(states_ric, axis=0)
+    scatter_3d_with_projection(*(np.array(states_ric - mean_state_ric).T[:3] / 1e3), ax=ax)
+    ax.set_xlabel("R [km]", fontsize=7)
+    ax.set_ylabel("I [km]", fontsize=7)
+    ax.set_zlabel("C [km]", fontsize=7)
+    # plt.tight_layout()
+    ax.set_aspect("equal")
+    draw_3d_frame(ax)
+    savefig("aod_monte_carlo_ric.pdf", *figdirs, pad_inches=0.3, close=False)
+
+    # Scatter velocity realisations
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    scatter_3d_with_projection(*(np.array(states_ric - mean_state_ric).T[3:]), ax=ax)
+    ax.set_xlabel("$v_R$ [m/s]", fontsize=7)
+    ax.set_ylabel("$v_I$ [m/s]", fontsize=7)
+    ax.set_zlabel("$v_C$ [m/s]", fontsize=7)
+    ax.set_aspect("equal")
+    draw_3d_frame(ax)
+    savefig("aod_monte_carlo_ric_vel.pdf", *figdirs, pad_inches=0.3, close=False)
+
+    # Rho covariance
+    fig = plt.figure(figsize=(2.3, 2))
+    ax = fig.add_subplot(111)
+    rho_cov = np.cov(np.array([mc.rho1_list, mc.rho3_list]))
+    plot_covariance(rho_cov, ax=ax, labels=[r"$\rho_1$", r"$\rho_3$"])
+    savefig("aod_rho_covariance.pdf", *figdirs, close=False)
+
+    # Plot rho correlation
+    fig = plt.figure(figsize=(3, 2.5))
+    ax = fig.add_subplot(111)
+    rho_corr = np.corrcoef(np.array([mc.rho1_list, mc.rho3_list]))
+    xx = np.array(mc.rho1_list) / 1000
+    yy = np.array(mc.rho3_list) / 1000
+    xxyy = np.vstack([xx, yy])
+    col = gaussian_kde(xxyy)(xxyy)
+    ax.scatter(xx, yy, c=col, alpha=0.5, zorder=10, label="Samples")
+    ax.set_xlabel(r"$\rho_1$ [km]")
+    ax.set_ylabel(r"$\rho_3$ [km]")
+    ax.axvline(mc.rho1 / 1000, color="k", linestyle="--", zorder=1)
+    ax.axhline(mc.rho3 / 1000, color="k", linestyle="--", zorder=1, label="Mean solution")
+    ax.set_title(f"Correlation: {rho_corr[0, 1]:.2f}")
+    ax.set_aspect("equal")
     ax.legend()
-    savefig("aod_monte_carlo.pdf", FIG_DIR, "tmp", close=False)
+    savefig("aod_rho_correlation.pdf", *figdirs, close=False)
+
+
+def print_mc_info():
+    figdirs = [FIG_DIR, "info"]
+    mc = load_pkl(f"{CACHE_DIR}/aod_monte_carlo.pkl")
+    LOG("Initial State: ", mc.initial_state)
+
+    # Keplerian elements
+    kep_state = element_conversion.cartesian_to_keplerian(mc.initial_state, MU_EARTH)
+    LOG("Keplerian Elements: ", kep_state)
+    LOG(f"a = {kep_state[0]/1000:.2f} km")
+    LOG(f"e = {kep_state[1]:.4f}")
+    LOG(f"i = {np.degrees(kep_state[2]):.2f} deg")
+    LOG(f"RAAN = {np.degrees(kep_state[3]):.2f} deg")
+    LOG(f"AoP = {np.degrees(kep_state[4]):.2f} deg")
+    LOG(f"TA = {np.degrees(kep_state[5]):.2f} deg")
+
+    # GPS orbit
+    TLE  = environment.Tle(
+        "1 36585U 10022A   24106.74392310 -.00000020  00000+0  00000+0 0  9995",
+        "2 36585  54.4704 240.5201 0115895  61.7635 323.1802  2.00573615101701",
+    )
+    
+    state_gps =  spice.get_cartesian_state_from_tle_at_epoch(mc.aod.obs_times[0], TLE)
+    states_gps = get_kepler_interpolation(state_gps)
+
+    # Plot AOD solution with GPS orbit
+    fig = plt.figure(figsize=(6, 4))
+    ax = fig.add_subplot(111, projection="3d")
+    plot_aod_solution(mc.aod, mc.rho1, mc.rho3, ax=ax, all_labels=False, label="Converged Orbit")
+    ax.plot(*states_gps[:, :3].T / 1000, label="NAVSTAR-65")
+    ax.plot(*state_gps[:3] / 1000, marker="o", markersize=3)
+    
+    plt.legend(loc="upper left", bbox_to_anchor=(1, 1))
+    
+    ax.view_init(elev=30, azim=160, roll=0)
+    savefig("aod_gps.pdf", *figdirs, close=False)
 
 
 if __name__ == "__main__":
@@ -801,8 +1004,8 @@ if __name__ == "__main__":
     # aod_monte_carlo(n_samples=1000)
 
     # Process
-    process_monte_carlo()
-    # process_monte_carlo_tmp()
+    # process_monte_carlo()
+    print_mc_info()
 
     # test_cov_plot()
     # test_process_rso(IOD_RESULT_FILENAME)
