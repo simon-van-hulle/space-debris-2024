@@ -121,7 +121,7 @@ def read_measurement_file(meas_file):
 ###############################################################################
 
 
-def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodies, verbose=True):
+def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodies, verbose=False):
     '''
     This function implements the Unscented Kalman Filter for the least
     squares cost function.
