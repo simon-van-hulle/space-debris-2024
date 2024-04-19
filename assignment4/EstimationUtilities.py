@@ -182,7 +182,7 @@ def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodie
     # Retrieve data from input parameters
     UTC0 = state_params['UTC']
     t0 = (UTC0 - datetime(2000, 1, 1, 12, 0, 0)).total_seconds()
-    Xo = state_params['state']
+    Xo = state_params['state'].reshape((6, 1))
     Po = state_params['covar']
     Qeci = filter_params['Qeci']
     Qric = filter_params['Qric']
@@ -267,7 +267,7 @@ def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodie
         Yk = Yk_list[kk]
 
         # Computed measurements and covariance
-        gamma_til_k, Rk = unscented_meas(tk, chi_bar, sensor_params)
+        gamma_til_k, Rk, sigma_dict_meas = unscented_meas(tk, chi_bar, sensor_params)
         ybar = np.dot(gamma_til_k, Wm.T)
         ybar = np.reshape(ybar, (len(ybar), 1))
         Y_diff = gamma_til_k - np.dot(ybar, np.ones((1, (2 * n + 1))))
@@ -289,7 +289,7 @@ def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodie
         sqP = np.linalg.cholesky(P)
         Xrep = np.tile(Xk, (1, n))
         chi_k = np.concatenate((Xk, Xrep + (gam * sqP), Xrep - (gam * sqP)), axis=1)
-        gamma_til_post, dum = unscented_meas(tk, chi_k, sensor_params)
+        gamma_til_post, dum, sigma_dict = unscented_meas(tk, chi_k, sensor_params)
         ybar_post = np.dot(gamma_til_post, Wm.T)
         ybar_post = np.reshape(ybar_post, (len(ybar), 1))
 
@@ -308,6 +308,9 @@ def ukf(state_params, meas_dict, sensor_params, int_params, filter_params, bodie
         filter_output[tk]['state'] = Xk
         filter_output[tk]['covar'] = P
         filter_output[tk]['resids'] = resids
+        filter_output[tk]['rk'] = Rk
+        filter_output[tk]['sigma_dict_meas'] = sigma_dict_meas
+        
 
     return filter_output
 
@@ -439,7 +442,7 @@ def unscented_meas(tk, chi, sensor_params):
             el_ind = meas_types.index('el')
             gamma_til[el_ind, jj] = el
 
-    return gamma_til, Rk
+    return gamma_til, Rk, sigma_dict
 
 
 def compute_measurement(tk, X, sensor_params):

@@ -203,8 +203,8 @@ def Std_from_Cov(Cov):
 
 class UkfSettings:
     def __init__(self):
-        self.Q_eci = I3 * 0
-        self.Q_ric = I3 * 0
+        self.Q_eci = I3 * 1e-14 
+        self.Q_ric = I3 * 1e-14
         self.alpha = 0.1
         self.gap_seconds = 600
 

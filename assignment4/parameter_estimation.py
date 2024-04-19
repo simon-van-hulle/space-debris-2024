@@ -6,11 +6,21 @@ from tudatpy.astro.time_conversion import DateTime
 import time
 import os
 import sys
-sys.path.append(r'..\assignment3')
+sys.path.append(r'assignment3')
+sys.path.append(r'assignment4/data/group4')
 import ukf_tuning
 import matplotlib.pyplot as plt
 import matplotlib
 import scienceplots
+# plt.close('all')
+# plt.style.use(['science', 'grid'])
+
+# # Set global font sizes
+# plt.rcParams['axes.labelsize'] = 26  # x and y labels
+# plt.rcParams['xtick.labelsize'] = 18 # x axis ticks
+# plt.rcParams['ytick.labelsize'] = 18 # y axis ticks
+# plt.rcParams['legend.fontsize'] = 26 # legend
+# plt.rcParams['figure.figsize'] = [20, 20]  # width, height in inches
 
 
 # import scienceplots
@@ -38,7 +48,7 @@ def get_inertial_to_ric_matrix(state_ref):
 matplotlib.rcParams.update({'font.size': 14, 'font.family': 'serif'})
 
 #%% data unpacking
-with open('data/group4/q1_meas_objchar_91861.pkl', 'rb') as f:
+with open('assignment4/data/group4/q1_meas_objchar_91861.pkl', 'rb') as f:
     data = pickle.load(f)
 
 state_info = data[0]
@@ -74,151 +84,110 @@ int_params_rk78_fixed = {'tudat_integrator': 'rkf78', 'step': 10, 'min_step': 10
                          'atol': np.inf}
 int_params_rk4_fixed = {'tudat_integrator': 'rk4', 'step': 10}
 
-#%% one propagation with the propagate_orbit, so no ukf
-# # propagation, save only states and times needed for the residuals
-# t_out, X_out = TudatPropagator.propagate_orbit_mod_output(state, t_vec_prop, state_params, int_params_rk4_fixed)
-#
-# # preallocate
-# predicted_observations = np.zeros((len(tk_list), 2))
-# # compute predicted observations
-# for i in range(len(tk_list)):
-#     predicted_observations[i, :] = EstUtil.compute_measurement(tk_list[i], X_out[i, :], optical_sensor_params).flatten()
-#
-# # true angular difference (arc between predicted and observed position) with spherical trig (cosines law)
-# angular_difference = np.cos(np.pi - predicted_observations[:, 1]) * np.cos(np.pi - Yk_arr[:, 1]) + np.sin(np.pi - predicted_observations[:, 1]) * np.sin(np.pi - Yk_arr[:, 1]) * np.cos(predicted_observations[:, 0] - Yk_arr[:, 0])
-# angular_difference = np.arccos(angular_difference)
-# # rms
-# rms_angular_difference = np.sqrt(np.mean(angular_difference**2))
+area_initial_guess = 100
+print('area_initial_guess: ' + str(area_initial_guess))
+predicted_observations = np.zeros((len(tk_list), 2))
+iteration = 0
+area_current_guess = area_initial_guess
+print(state[:,-1])
+for key in optical_sensor_params:
+    last_value = optical_sensor_params[key][-1]  # Access the last item of the list stored at the current key
+    print(f"Last value for {key}: {last_value}")
+while iteration < 20:
+    # compute derivative
+    time_pre = time.time()
+    state_params['area'] = area_current_guess * 1.001
+    t_out, X_out_right = TudatPropagator.propagate_orbit_mod_output(state, t_vec_prop, state_params,
+                                                                    int_params_rk4_fixed)
+    for i in range(len(tk_list)):
+        predicted_observations[i, :] = EstUtil.compute_measurement(tk_list[i], X_out_right[i, :],
+                                                                   optical_sensor_params).flatten()
+    angular_difference_right = np.arccos(np.cos(np.pi - predicted_observations[:, 1]) * np.cos(np.pi - Yk_arr[:, 1]) +
+                                         np.sin(np.pi - predicted_observations[:, 1]) * np.sin(np.pi - Yk_arr[:, 1]) *
+                                         np.cos(predicted_observations[:, 0] - Yk_arr[:, 0]))
+    rms_right = np.sqrt(np.mean(angular_difference_right ** 2))
+
+    state_params['area'] = area_current_guess * 0.999
+    t_out, X_out_left = TudatPropagator.propagate_orbit_mod_output(state, t_vec_prop, state_params,
+                                                                   int_params_rk4_fixed)
+    time_pre_measurement = time.time()
+    for i in range(len(tk_list)):
+        predicted_observations[i, :] = EstUtil.compute_measurement(tk_list[i], X_out_left[i, :],
+                                                                   optical_sensor_params).flatten()
+    time_post_measurement = time.time()
+    print('measurement time: ' + str(time_post_measurement - time_pre_measurement))
+    angular_difference_left = np.arccos(np.cos(np.pi - predicted_observations[:, 1]) * np.cos(np.pi - Yk_arr[:, 1]) +
+                                        np.sin(np.pi - predicted_observations[:, 1]) * np.sin(np.pi - Yk_arr[:, 1]) *
+                                        np.cos(predicted_observations[:, 0] - Yk_arr[:, 0]))
+    rms_left = np.sqrt(np.mean(angular_difference_left ** 2))
+
+    derivative = (rms_right - rms_left) / (2 * 0.001 * area_current_guess)
+    area_new_guess = area_current_guess - 1e6 * derivative
+    time_post = time.time()
+    print('time of one iteration: ' + str(time_post - time_pre))
+    # check if deviation from previous area value is significant
+    print('new value: ' + str(area_new_guess))
+    deviation = np.abs(area_new_guess - area_current_guess) / area_current_guess
+    if deviation < 0.000001:
+        break
+    iteration +=1
+    area_current_guess = area_new_guess
 
 
-#%% code for n iterations and see behaviour of rms when varying gamma = Cr * A / m (here mimicked by varying area and
-# keeping constant the others)
-# keep the same until right before propagation
-# initialize outside once, then it gets overwritten every time
-# predicted_observations = np.zeros((len(tk_list), 2))
-# number_of_iterations = 10
-# gamma = state_params['Cr'] * state_params['area'] / state_params['mass']
-# area_array = np.linspace(94, 106, number_of_iterations)
-# rms_array = np.zeros(number_of_iterations)
-# for area in area_array:
-#     state_params['area'] = area
-#     t_out, X_out = TudatPropagator.propagate_orbit_mod_output(state, t_vec_prop, state_params, int_params_rk4_fixed)
-#     for i in range(len(tk_list)):
-#         predicted_observations[i, :] = EstUtil.compute_measurement(tk_list[i], X_out[i, :],
-#                                                                    optical_sensor_params).flatten()
-#     angular_difference = np.cos(np.pi - predicted_observations[:, 1]) * np.cos(np.pi - Yk_arr[:, 1]) + np.sin(
-#         np.pi - predicted_observations[:, 1]) * np.sin(np.pi - Yk_arr[:, 1]) * np.cos(
-#         predicted_observations[:, 0] - Yk_arr[:, 0])
-#     angular_difference = np.arccos(angular_difference)
-#     rms_array[np.where(area_array == area)[0][0]] = np.sqrt(np.mean(angular_difference ** 2))
-#
-# print(rms_array)
+# %% code for Monte Carlo simulation
 
+# set up the montecarlo simulation
+std_dev = optical_sensor_params['sigma_dict']['ra']
+area_initial_guess = 100.1
+predicted_observations = np.zeros((len(tk_list), 2))
+how_many_mc = 200
+area_final = np.zeros(how_many_mc)
+time_mc_pre = time.time()
+for montecarlo in range(how_many_mc):
+    Yk_arr_mc = np.random.normal(Yk_arr, std_dev)
+    area_current_guess = area_initial_guess
+    iteration = 0
+    while iteration < 10:
+        # compute derivative
+        state_params['area'] = area_current_guess * 1.001
+        t_out, X_out_right = TudatPropagator.propagate_orbit_mod_output(state, t_vec_prop, state_params,
+                                                                        int_params_rk4_fixed)
+        for i in range(len(tk_list)):
+            predicted_observations[i, :] = EstUtil.compute_measurement(tk_list[i], X_out_right[i, :],
+                                                                       optical_sensor_params).flatten()
+        angular_difference_right = np.arccos(
+            np.cos(np.pi - predicted_observations[:, 1]) * np.cos(np.pi - Yk_arr_mc[:, 1]) +
+            np.sin(np.pi - predicted_observations[:, 1]) * np.sin(np.pi - Yk_arr_mc[:, 1]) *
+            np.cos(predicted_observations[:, 0] - Yk_arr_mc[:, 0]))
+        rms_right = np.sqrt(np.mean(angular_difference_right ** 2))
 
-#%% gradient descent method in one variable: basically compute first derivative and move in that direction with a
-# constant step size multiplied by the derivative. here the derivative is computed numerically with a central difference
-# scheme
+        state_params['area'] = area_current_guess * 0.999
+        t_out, X_out_left = TudatPropagator.propagate_orbit_mod_output(state, t_vec_prop, state_params,
+                                                                       int_params_rk4_fixed)
+        for i in range(len(tk_list)):
+            predicted_observations[i, :] = EstUtil.compute_measurement(tk_list[i], X_out_left[i, :],
+                                                                       optical_sensor_params).flatten()
+        angular_difference_left = np.arccos(
+            np.cos(np.pi - predicted_observations[:, 1]) * np.cos(np.pi - Yk_arr_mc[:, 1]) +
+            np.sin(np.pi - predicted_observations[:, 1]) * np.sin(np.pi - Yk_arr_mc[:, 1]) *
+            np.cos(predicted_observations[:, 0] - Yk_arr_mc[:, 0]))
+        rms_left = np.sqrt(np.mean(angular_difference_left ** 2))
 
-# area_initial_guess = 100
-# print('area_initial_guess: ' + str(area_initial_guess))
-# predicted_observations = np.zeros((len(tk_list), 2))
-# iteration = 0
-# area_current_guess = area_initial_guess
-# while iteration < 20:
-#     # compute derivative
-#     time_pre = time.time()
-#     state_params['area'] = area_current_guess * 1.001
-#     t_out, X_out_right = TudatPropagator.propagate_orbit_mod_output(state, t_vec_prop, state_params,
-#                                                                     int_params_rk4_fixed)
-#     for i in range(len(tk_list)):
-#         predicted_observations[i, :] = EstUtil.compute_measurement(tk_list[i], X_out_right[i, :],
-#                                                                    optical_sensor_params).flatten()
-#     angular_difference_right = np.arccos(np.cos(np.pi - predicted_observations[:, 1]) * np.cos(np.pi - Yk_arr[:, 1]) +
-#                                          np.sin(np.pi - predicted_observations[:, 1]) * np.sin(np.pi - Yk_arr[:, 1]) *
-#                                          np.cos(predicted_observations[:, 0] - Yk_arr[:, 0]))
-#     rms_right = np.sqrt(np.mean(angular_difference_right ** 2))
-#
-#     state_params['area'] = area_current_guess * 0.999
-#     t_out, X_out_left = TudatPropagator.propagate_orbit_mod_output(state, t_vec_prop, state_params,
-#                                                                    int_params_rk4_fixed)
-#     time_pre_measurement = time.time()
-#     for i in range(len(tk_list)):
-#         predicted_observations[i, :] = EstUtil.compute_measurement(tk_list[i], X_out_left[i, :],
-#                                                                    optical_sensor_params).flatten()
-#     time_post_measurement = time.time()
-#     print('measurement time: ' + str(time_post_measurement - time_pre_measurement))
-#     angular_difference_left = np.arccos(np.cos(np.pi - predicted_observations[:, 1]) * np.cos(np.pi - Yk_arr[:, 1]) +
-#                                         np.sin(np.pi - predicted_observations[:, 1]) * np.sin(np.pi - Yk_arr[:, 1]) *
-#                                         np.cos(predicted_observations[:, 0] - Yk_arr[:, 0]))
-#     rms_left = np.sqrt(np.mean(angular_difference_left ** 2))
-#
-#     derivative = (rms_right - rms_left) / (2 * 0.001 * area_current_guess)
-#     area_new_guess = area_current_guess - 1e6 * derivative
-#     time_post = time.time()
-#     print('time of one iteration: ' + str(time_post - time_pre))
-#     # check if deviation from previous area value is significant
-#     print('new value: ' + str(area_new_guess))
-#     deviation = np.abs(area_new_guess - area_current_guess) / area_current_guess
-#     if deviation < 0.000001:
-#         break
-#     iteration +=1
-#     area_current_guess = area_new_guess
+        derivative = (rms_right - rms_left) / (2 * 0.001 * area_current_guess)
+        area_new_guess = area_current_guess - 1e6 * derivative
+        deviation = np.abs(area_new_guess - area_current_guess) / area_current_guess
+        if deviation < 0.001:
+            break
+        area_current_guess = area_new_guess
+        iteration += 1
 
+    area_final[montecarlo] = area_new_guess
+    print('montecarlo iteration: ' + str(montecarlo))
+time_mc_post = time.time()
+print('time of montecarlo simulation: ' + str(time_mc_post - time_mc_pre))
 
-#%% code for Monte Carlo simulation
-
-# # set up the montecarlo simulation
-# std_dev = optical_sensor_params['sigma_dict']['ra']
-# area_initial_guess = 100.1
-# predicted_observations = np.zeros((len(tk_list), 2))
-# how_many_mc = 200
-# area_final = np.zeros(how_many_mc)
-# time_mc_pre = time.time()
-# for montecarlo in range(how_many_mc):
-#     Yk_arr_mc = np.random.normal(Yk_arr, std_dev)
-#     area_current_guess = area_initial_guess
-#     iteration = 0
-#     while iteration < 10:
-#         # compute derivative
-#         state_params['area'] = area_current_guess * 1.001
-#         t_out, X_out_right = TudatPropagator.propagate_orbit_mod_output(state, t_vec_prop, state_params,
-#                                                                         int_params_rk4_fixed)
-#         for i in range(len(tk_list)):
-#             predicted_observations[i, :] = EstUtil.compute_measurement(tk_list[i], X_out_right[i, :],
-#                                                                        optical_sensor_params).flatten()
-#         angular_difference_right = np.arccos(
-#             np.cos(np.pi - predicted_observations[:, 1]) * np.cos(np.pi - Yk_arr_mc[:, 1]) +
-#             np.sin(np.pi - predicted_observations[:, 1]) * np.sin(np.pi - Yk_arr_mc[:, 1]) *
-#             np.cos(predicted_observations[:, 0] - Yk_arr_mc[:, 0]))
-#         rms_right = np.sqrt(np.mean(angular_difference_right ** 2))
-#
-#         state_params['area'] = area_current_guess * 0.999
-#         t_out, X_out_left = TudatPropagator.propagate_orbit_mod_output(state, t_vec_prop, state_params,
-#                                                                        int_params_rk4_fixed)
-#         for i in range(len(tk_list)):
-#             predicted_observations[i, :] = EstUtil.compute_measurement(tk_list[i], X_out_left[i, :],
-#                                                                        optical_sensor_params).flatten()
-#         angular_difference_left = np.arccos(
-#             np.cos(np.pi - predicted_observations[:, 1]) * np.cos(np.pi - Yk_arr_mc[:, 1]) +
-#             np.sin(np.pi - predicted_observations[:, 1]) * np.sin(np.pi - Yk_arr_mc[:, 1]) *
-#             np.cos(predicted_observations[:, 0] - Yk_arr_mc[:, 0]))
-#         rms_left = np.sqrt(np.mean(angular_difference_left ** 2))
-#
-#         derivative = (rms_right - rms_left) / (2 * 0.001 * area_current_guess)
-#         area_new_guess = area_current_guess - 1e6 * derivative
-#         deviation = np.abs(area_new_guess - area_current_guess) / area_current_guess
-#         if deviation < 0.001:
-#             break
-#         area_current_guess = area_new_guess
-#         iteration += 1
-#
-#     area_final[montecarlo] = area_new_guess
-#     print('montecarlo iteration: ' + str(montecarlo))
-# time_mc_post = time.time()
-# print('time of montecarlo simulation: ' + str(time_mc_post - time_mc_pre))
-#
-# print(area_final)
-# np.savetxt('area_final.dat', area_final)
+print(area_final)
+np.savetxt('area_final.dat', area_final)
 
 # #%% run UKF
 settings = ukf_tuning.UkfSettings()
@@ -226,7 +195,7 @@ intsettings = settings.get_int_params()
 filter_params = settings.get_filter_params()
 bodies = ukf_tuning.tudat_initialize_bodies()
 
-directory_path = r'..\assignment4\data\group4'
+directory_path = r'assignment4\data\group4'
 filename = 'q1_meas_objchar_91861.pkl'
 filepath = os.path.join(directory_path, filename)
 state_params, meas_dict, sensor_params = EstUtil.read_measurement_file(filepath)
@@ -253,12 +222,12 @@ plt.ylabel('residual [rad]')
 plt.yscale('log')
 plt.title('Post fit angular residuals')
 
-dir_path = r"C:\Users\uliul\OneDrive\Documenti\Ulisse\Delft\TU Delft\Q3\Space debris\simon shared\assignment4\plot"
+dir_path = r"assignment4\plot"
 if not os.path.exists(dir_path):
     os.makedirs(dir_path)
-plt.savefig(os.path.join(dir_path, "Post_fit_residuals_q1.png"))
+plt.savefig(os.path.join(dir_path, "Post_fit_residuals_q1_test.png"))
 
-plt.show()
+
 
 rms_residual = np.sqrt(np.mean(residual**2))
 print('rms residual: ' + str(rms_residual))
@@ -284,12 +253,12 @@ ax[2].set_ylabel('std dev C [m]')
 plt.xlabel('time after initial state [s]')
 plt.suptitle('Standard deviation in RIC frame')
 
-dir_path = r"C:\Users\uliul\OneDrive\Documenti\Ulisse\Delft\TU Delft\Q3\Space debris\simon shared\assignment4\plot"
+dir_path = r"assignment4\plot"
 if not os.path.exists(dir_path):
     os.makedirs(dir_path)
-plt.savefig(os.path.join(dir_path, "Std_dev_q1.png"))
+plt.savefig(os.path.join(dir_path, "Std_dev_q1_test.png"))
 
-plt.show()
+
 
 # plot 3sigma bounds
 fig, ax = plt.subplots(3, 1, sharex=True)
@@ -302,10 +271,10 @@ ax[2].set_ylabel('std dev C [m]')
 plt.xlabel('time after initial state [hours]')
 plt.suptitle('3 $\sigma$ covariance bounds in RIC frame')
 fig.tight_layout()
-dir_path = r"C:\Users\uliul\OneDrive\Documenti\Ulisse\Delft\TU Delft\Q3\Space debris\simon shared\assignment4\plot"
+dir_path = r"assignment4\plot"
 if not os.path.exists(dir_path):
     os.makedirs(dir_path)
-plt.savefig(os.path.join(dir_path, "3sigma_bounds_ric.png"))
+plt.savefig(os.path.join(dir_path, "3sigma_bounds_ric_test.png"))
 
 plt.show()
 
