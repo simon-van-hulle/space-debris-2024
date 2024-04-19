@@ -17,6 +17,8 @@ from tudatpy.interface import spice
 from tudatpy import constants
 from tudatpy.astro import element_conversion
 from tudatpy.numerical_simulation import environment
+from ConjunctionUtilities import compute_TCA
+from TudatPropagator import propagate_orbit
 
 from sutils.utils import *
 from sutils.logging import *
@@ -960,7 +962,16 @@ def process_monte_carlo():
 def print_mc_info():
     figdirs = [FIG_DIR, "info"]
     mc = load_pkl(f"{CACHE_DIR}/aod_monte_carlo.pkl")
-    LOG("Initial State: ", mc.initial_state)
+    rso = RsoFile(IOD_MEAS_PATH)
+
+    rso.state_params = DEFAULT_STATE_PARAMS.copy()
+    rso.state_params.update(
+        {
+            "UTC": sec_j2000_to_datetime(rso.tk[0]),
+            "state": mc.initial_state,
+            "covar": mc.state_cov,
+        }
+    )    
 
     # Keplerian elements
     kep_state = element_conversion.cartesian_to_keplerian(mc.initial_state, MU_EARTH)
@@ -978,20 +989,50 @@ def print_mc_info():
         "2 36585  54.4704 240.5201 0115895  61.7635 323.1802  2.00573615101701",
     )
     
-    state_gps =  spice.get_cartesian_state_from_tle_at_epoch(mc.aod.obs_times[0], TLE)
+    t0 = mc.aod.obs_times[0]
+    
+    state_gps =  spice.get_cartesian_state_from_tle_at_epoch(t0, TLE)
     states_gps = get_kepler_interpolation(state_gps)
 
+        
+    int_params = {
+            "tudat_integrator": "rk4",
+            "step": 100,
+            "max_step":1000,
+            "min_step": 1e-4,
+            "rtol": 1e-12,
+            "atol": 1e-12
+        }
+    
+    # tca = compute_TCA(mc.initial_state, state_gps, [t0, t0 + 72 * 3600], rso.state_params, rso.state_params, int_params)
+    # print("TCA: ", tca[0])  
+    # print("range: ", tca[1])  
+    
+    tvec = np.linspace(t0, t0 + 5 * 72 * 3600, 500)
+    
+    tvec, Xrso = propagate_orbit(mc.initial_state, tvec, state_params=rso.state_params, int_params=int_params)
+    Xgps = propagate_orbit(state_gps, tvec, state_params=rso.state_params, int_params=int_params)[1]
+    
+    plt.figure(figsize=(3, 2.5))
+    Xdiff = Xrso - Xgps
+    plt.plot((tvec - tvec[0])/3600, np.linalg.norm(Xdiff, axis=1) / 1000, '.', markersize=3)
+    plt.xlabel("Time [hr]")
+    plt.ylabel("Distance [km]")
+    savefig("rso_gps_diff.pdf", *figdirs, close=False)
+    
+
     # Plot AOD solution with GPS orbit
-    fig = plt.figure(figsize=(6, 4))
+    fig = plt.figure(figsize=(3, 2.5))
     ax = fig.add_subplot(111, projection="3d")
     plot_aod_solution(mc.aod, mc.rho1, mc.rho3, ax=ax, all_labels=False, label="Converged Orbit")
     ax.plot(*states_gps[:, :3].T / 1000, label="NAVSTAR-65")
     ax.plot(*state_gps[:3] / 1000, marker="o", markersize=3)
     
+    
     plt.legend(loc="upper left", bbox_to_anchor=(1, 1))
     
     ax.view_init(elev=30, azim=160, roll=0)
-    savefig("aod_gps.pdf", *figdirs, close=False)
+    savefig("aod_gps.pdf", *figdirs, pad_inches=0.3, close=False)
 
 
 if __name__ == "__main__":
@@ -1011,5 +1052,5 @@ if __name__ == "__main__":
     # test_process_rso(IOD_RESULT_FILENAME)
     # test_process_rso("q4_meas_rso_91447.pkl")
 
-    plt.show()
+    # plt.show()
     # END()
