@@ -1,3 +1,4 @@
+
 import matplotlib
 import scienceplots
 import numpy as np
@@ -9,6 +10,18 @@ import os
 import pandas as pd
 import sys
 import time
+
+USING_LINUX = os.name == "posix"
+print(USING_LINUX)
+FILE_PATH = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(f'{FILE_PATH}/../assignment2')
+sys.path.append(f'{FILE_PATH}/../assignment3')
+dir_path = r"assignment4\plot"
+if USING_LINUX:
+    dir_path = f"{FILE_PATH}/../assignment4/plot"
+    
+print(dir_path)
+
 from scipy.optimize import minimize
 import EstimationUtilities as EstUtil
 from tudatpy.astro.time_conversion import DateTime
@@ -16,8 +29,14 @@ sys.path.append('assignment3')
 import EstimationUtilities
 import ukf_tuning
 
+I3 = np.eye(3)
 
+NOISE = 1e-12
+# NOISE = 0
 settings = ukf_tuning.UkfSettings()
+settings.Q_eci = I3 * 0
+settings.Q_ric = I3 * NOISE
+
 intsettings = settings.get_int_params()
 filter_params = settings.get_filter_params()
 bodies = TudatPropagator.tudat_initialize_bodies()
@@ -39,6 +58,9 @@ def get_inertial_to_ric_matrix(state_ref):
 
 
 file_path = 'assignment3\group4_sensor_tasking_file.json'
+if USING_LINUX:
+    file_path = f"{FILE_PATH}/../assignment3/group4_sensor_tasking_file.json"
+    
 # Open the JSON file and load its contents into a Python dictionary
 with open(file_path, 'r') as file:
     data = json.load(file)
@@ -46,6 +68,8 @@ with open(file_path, 'r') as file:
 
 # Replace 'your_directory_path' with the actual directory path that contains your .pkl files
 directory_path = 'assignment4\data\group4'
+if USING_LINUX:
+    directory_path = f"{FILE_PATH}/../assignment4/data/group4"
 
 # Data structure to store all the returned values from each file
 all_data = []
@@ -134,10 +158,14 @@ for filename in os.listdir(directory_path):
         # state_params['area'] = areas[k]
         # Now run the Unscented Kalman Filter with the parameters
         # filter_params['area'] = areas[k]
-        if k ==0 or k==9:
-            state_params['covar'] = state_params['covar']*2.5
-            filter_params
-            print(k)
+        state_params['covar'] = state_params['covar']*2.5
+        # if k ==0 or k==9:
+        #     state_params['covar'] = state_params['covar']*2.5
+        #     filter_params
+        #     print(k)
+        print(filter_params)
+        print(sensor_params['sigma_dict']['ra'])
+    
         ukf_result = EstimationUtilities.ukf(state_params, meas_dict, sensor_params, intsettings, filter_params, bodies, verbose=False)
         
         # Append the result of the UKF for this file to the results list
@@ -205,13 +233,13 @@ for i in range(len(ukf_results)):
     UTC = all_data[i]['state_params']['UTC']
     initial_epoch = DateTime(UTC.year, UTC.month, UTC.day, UTC.hour).epoch()
     
-    
-    
+    plt.figure()
     plt.plot((tk_arr - initial_epoch)/3600, residuals[i], 'o', label='residuals')
     plt.xlabel('time after initial state [hours]')
     plt.ylabel('residual [rad]')
     plt.yscale('log')
     plt.title('Post fit angular residuals')
+    print(os.path.join(dir_path, "residuals_q4_"+str(ukf_results[i]['filename'])+"_test.png"))
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
     plt.savefig(os.path.join(dir_path, "residuals_q4_"+str(ukf_results[i]['filename'])+"_test.png"))
@@ -256,7 +284,7 @@ for i in range(len(ukf_results)):
     plt.xlabel('time after initial state [hours]')
     plt.suptitle('3 $\sigma$ covariance bounds in RIC frame')
     fig.tight_layout()
-    dir_path = r"assignment4\plot"
+    # dir_path = r"assignment4\plot"
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
     plt.savefig(os.path.join(dir_path, "3sigma_bounds_ric_"+str(ukf_results[i]['filename'])+"_test.png"))
@@ -281,7 +309,7 @@ for i in range(len(ukf_results)):
     plt.xlabel('Time after initial state [hours]')
     plt.suptitle('3 $\sigma$ covariance bounds for RA and DEC')
     fig.tight_layout()
-    dir_path = r"assignment4\plot"
+    # dir_path = r"assignment4\plot"
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
     plt.savefig(os.path.join(dir_path, "3sigma_bounds_ra_de"+str(ukf_results[i]['filename'])+"_test.png"))
@@ -306,7 +334,7 @@ for i in range(len(ukf_results)):
     plt.xlabel('time after initial state [s]')
     plt.suptitle('State evolution')
     fig.tight_layout()
-    dir_path = r"assignment4\plot"
+    # dir_path = r"assignment4\plot"
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
     plt.savefig(os.path.join(dir_path, "state_evolution_"+str(ukf_results[i]['filename'])+"_test.png"))
