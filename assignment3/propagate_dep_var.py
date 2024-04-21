@@ -24,7 +24,7 @@ bodies_to_create = ['Earth', 'Moon', 'Sun']
 bodies = prop.tudat_initialize_bodies(bodies_to_create)
 
 # for the RK4 integrator
-step_rk4 = 10        # initial step size [s]
+step_rk4 = -10        # initial step size [s]
 
 # for the RKF78 integrator
 step_rkf78 = 10       # initial step size
